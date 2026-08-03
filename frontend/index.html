@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Age of Agents</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; display: flex; height: 100vh; }
+  
+  #canvas-container { flex: 1; position: relative; }
+  #canvas-container canvas { display: block; width: 100% !important; height: 100% !important; }
+  
+  #hud {
+    width: 260px;
+    background: rgba(16, 16, 36, 0.95);
+    border-left: 1px solid #2a2a4a;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    font-size: 13px;
+  }
+  #hud h2 { font-size: 16px; color: #88aaff; margin-bottom: 4px; border-bottom: 1px solid #2a2a4a; padding-bottom: 4px; }
+  #hud h3 { font-size: 13px; color: #aabbee; margin-top: 8px; }
+  
+  .agent-card {
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .agent-card:hover { background: rgba(255,255,255,0.08); }
+  .agent-card .name { font-weight: 600; font-size: 14px; }
+  .agent-card .status { font-size: 11px; opacity: 0.7; margin-top: 2px; }
+  .agent-card .resources { font-size: 11px; margin-top: 2px; }
+  .agent-card .health-bar {
+    height: 3px; background: #333; border-radius: 2px; margin-top: 4px; overflow: hidden;
+  }
+  .agent-card .health-bar .fill {
+    height: 100%; border-radius: 2px; transition: width 0.3s;
+  }
+  
+  .event-log {
+    font-size: 11px;
+    opacity: 0.6;
+    max-height: 120px;
+    overflow-y: auto;
+    margin-top: auto;
+  }
+  .event-log div { padding: 1px 0; }
+
+  #controls { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  #controls button {
+    background: #2a2a5a; color: #ccc; border: 1px solid #3a3a6a;
+    padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
+  }
+  #controls button:hover { background: #3a3a7a; }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="hud">
+  <h2>🏰 Age of Agents</h2>
+  <div id="tick-info">Tick: 0 | Time: 0.0s</div>
+  
+  <h3>⚔️ Agents</h3>
+  <div id="agent-list"></div>
+
+  <h3>📦 Resources</h3>
+  <div id="resource-count" style="font-size: 11px; opacity: 0.7;"></div>
+
+  <div id="controls">
+    <button onclick="resetWorld()">🔄 Reset</button>
+  </div>
+
+  <div class="event-log" id="event-log"><div>— ready —</div></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+// ── Scene setup ─────────────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a2a1a); // forest green ground
+
+const camera = new THREE.OrthographicCamera(-600, 600, 400, -400, 0.1, 2000);
+camera.position.set(600, 400, 800);
+camera.lookAt(600, 400, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(600, 400, 0);
+controls.update();
+
+// ── Lighting ────────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambient);
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(800, 600, 500);
+scene.add(dir);
+
+// ── Ground grid ──────────────────────────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(1200, 800);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x2a3a2a, roughness: 0.9 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(600, 400, -1);
+scene.add(ground);
+
+// Grid helper
+const gridHelper = new THREE.GridHelper(1200, 20, 0x3a5a3a, 0x2a4a2a);
+gridHelper.position.set(600, 400, 0);
+scene.add(gridHelper);
+
+// ── Game objects ─────────────────────────────────────────────────────────
+
+const agentMeshes = new Map(); // id -> {mesh, labelSprite, ring}
+const resourceMeshes = new Map(); // id -> mesh
+const buildingMeshes = new Map(); // id -> mesh
+
+function createAgentMesh(color) {
+  const group = new THREE.Group();
+  
+  // Body (cylinder)
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(8, 6, 16, 8),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.6 })
+  );
+  body.position.y = 8;
+  group.add(body);
+  
+  // Head (sphere)
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(6, 8, 8),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.4 })
+  );
+  head.position.y = 20;
+  group.add(head);
+  
+  // Selection ring
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(12, 14, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.5;
+  group.add(ring);
+  
+  return group;
+}
+
+function createResourceMesh(kind) {
+  const colors = { wood: 0x4a7a3a, gold: 0xffaa33, food: 0xcc6644, stone: 0x888888 };
+  const color = colors[kind] || 0x888888;
+  
+  if (kind === 'wood') {
+    // Tree
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(2, 3, 12, 6),
+      new THREE.MeshStandardMaterial({ color: 0x6a5a3a, roughness: 0.9 })
+    );
+    trunk.position.y = 6;
+    const foliage = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 6, 6),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+    );
+    foliage.position.y = 16;
+    const group = new THREE.Group();
+    group.add(trunk);
+    group.add(foliage);
+    return group;
+  }
+  
+  if (kind === 'gold') {
+    const mesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(6),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.7 })
+    );
+    mesh.position.y = 6;
+    return mesh;
+  }
+  
+  if (kind === 'food') {
+    // Bush
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(7, 6, 6),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
+    );
+    mesh.position.y = 5;
+    return mesh;
+  }
+  
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 6, 6),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+  );
+  mesh.position.y = 3;
+  return mesh;
+}
+
+function createBuildingMesh(kind) {
+  if (kind === 'town_center') {
+    const group = new THREE.Group();
+    // Base
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(40, 16, 40),
+      new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 0.9 })
+    );
+    base.position.y = 8;
+    group.add(base);
+    // Roof
+    const roof = new THREE.Mesh(
+      new THREE.ConeGeometry(26, 16, 4),
+      new THREE.MeshStandardMaterial({ color: 0x6a3a2a, roughness: 0.8 })
+    );
+    roof.position.y = 20;
+    roof.rotation.y = Math.PI / 4;
+    group.add(roof);
+    return group;
+  }
+  
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(20, 12, 20),
+    new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.8 })
+  );
+  mesh.position.y = 6;
+  return mesh;
+}
+
+// ── World state ─────────────────────────────────────────────────────────
+
+let world = { agents: {}, resources: [], buildings: [], tick: 0, time: 0 };
+
+function updateScene() {
+  // Update agents
+  const activeAgentIds = new Set(Object.keys(world.agents));
+  for (const [id, mesh] of agentMeshes) {
+    if (!activeAgentIds.has(id)) { scene.remove(mesh); agentMeshes.delete(id); }
+  }
+  
+  for (const [id, data] of Object.entries(world.agents)) {
+    let mesh = agentMeshes.get(id);
+    if (!mesh) {
+      mesh = createAgentMesh(data.color);
+      scene.add(mesh);
+      agentMeshes.set(id, mesh);
+    }
+    mesh.position.set(data.x, 0, data.y);
+    
+    // Selection ring highlight if state is THINKING
+    const ring = mesh.children.find(c => c.type === 'RingGeometry' || (c.geometry && c.geometry.type === 'RingGeometry'));
+    if (ring) {
+      ring.material.opacity = data.state === 'thinking' ? 0.6 : (data.state === 'active' ? 0.2 : 0);
+    }
+  }
+  
+  // Update resources
+  const activeResIds = new Set(world.resources.map(r => r.id));
+  for (const [id, mesh] of resourceMeshes) {
+    if (!activeResIds.has(id)) { scene.remove(mesh); resourceMeshes.delete(id); }
+  }
+  for (const r of world.resources) {
+    let mesh = resourceMeshes.get(r.id);
+    if (!mesh) {
+      mesh = createResourceMesh(r.kind);
+      scene.add(mesh);
+      resourceMeshes.set(r.id, mesh);
+    }
+    mesh.position.set(r.x, 0, r.y);
+    
+    // Scale based on remaining amount
+    const s = 0.3 + 0.7 * (r.amount / 100);
+    mesh.scale.set(s, s, s);
+    mesh.rotation.y += 0.005;
+  }
+  
+  // Update buildings
+  const activeBuildIds = new Set(world.buildings.map(b => b.id));
+  for (const [id, mesh] of buildingMeshes) {
+    if (!activeBuildIds.has(id)) { scene.remove(mesh); buildingMeshes.delete(id); }
+  }
+  for (const b of world.buildings) {
+    let mesh = buildingMeshes.get(b.id);
+    if (!mesh) {
+      mesh = createBuildingMesh(b.kind);
+      scene.add(mesh);
+      buildingMeshes.set(b.id, mesh);
+    }
+    mesh.position.set(b.x, 0, b.y);
+  }
+}
+
+// ── WebSocket ───────────────────────────────────────────────────────────
+
+const eventLog = document.getElementById('event-log');
+const agentList = document.getElementById('agent-list');
+const tickInfo = document.getElementById('tick-info');
+const resourceCount = document.getElementById('resource-count');
+
+let ws = null;
+
+function connectWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
+  
+  ws = new WebSocket(wsUrl);
+  
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    
+    if (msg.type === 'state') {
+      world = msg;
+      updateScene();
+      updateHUD();
+    }
+  };
+  
+  ws.onclose = () => {
+    setTimeout(connectWebSocket, 1000);
+  };
+  
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function updateHUD() {
+  tickInfo.textContent = `Tick: ${world.tick} | Time: ${world.time?.toFixed(1) || '0.0'}s`;
+  
+  // Agent cards
+  agentList.innerHTML = '';
+  for (const [id, a] of Object.entries(world.agents)) {
+    const card = document.createElement('div');
+    card.className = 'agent-card';
+    
+    const healthPct = Math.round(a.health);
+    const healthColor = healthPct > 60 ? '#44cc66' : healthPct > 30 ? '#ccaa44' : '#cc4444';
+    
+    card.innerHTML = `
+      <div class="name" style="color: ${a.color}">${a.name}</div>
+      <div class="status">${a.state}${a.action ? ' → ' + a.action : ''}</div>
+      <div class="resources">🪵${a.wood}  🪙${a.gold}  🪨${a.stone}  🍖${a.food}</div>
+      <div class="health-bar"><div class="fill" style="width:${healthPct}%;background:${healthColor}"></div></div>
+    `;
+    agentList.appendChild(card);
+  }
+  
+  // Resource counts
+  if (world.resources) {
+    const counts = {};
+    for (const r of world.resources) {
+      counts[r.kind] = (counts[r.kind] || 0) + 1;
+    }
+    resourceCount.textContent = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(' | ');
+  }
+  
+  // Events
+  if (world.events && world.events.length > 0) {
+    for (const ev of world.events.slice(-5)) {
+      const el = document.createElement('div');
+      el.textContent = JSON.stringify(ev);
+      eventLog.appendChild(el);
+    }
+    while (eventLog.children.length > 50) eventLog.removeChild(eventLog.firstChild);
+    eventLog.scrollTop = eventLog.scrollHeight;
+  }
+}
+
+// ── Controls ────────────────────────────────────────────────────────────
+
+window.resetWorld = async function() {
+  try {
+    await fetch('/reset', { method: 'POST' });
+  } catch (e) {
+    console.error('Reset failed', e);
+  }
+};
+
+// ── Animation loop ──────────────────────────────────────────────────────
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ── Resize ──────────────────────────────────────────────────────────────
+
+function resize() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  const aspect = w / h;
+  const viewSize = 400;
+  
+  camera.left = -viewSize * aspect;
+  camera.right = viewSize * aspect;
+  camera.top = viewSize;
+  camera.bottom = -viewSize;
+  camera.position.set(600, 400, 800);
+  camera.lookAt(600, 400, 0);
+  camera.updateProjectionMatrix();
+  
+  renderer.setSize(w, h);
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+// ── Start ───────────────────────────────────────────────────────────────
+
+connectWebSocket();
+animate();
+</script>
+</body>
+</html>
