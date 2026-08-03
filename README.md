@@ -10,7 +10,7 @@ Age of Agents is an Age of Empires-inspired sandbox where every NPC is driven by
 ┌─────────────────────────────────────────────────┐
 │                 Modal Server                     │
 │  ┌──────────┐  ┌────────────┐  ┌───────────┐   │
-│  │ FastAPI  │◄─┤ WebSocket  ├─►│ Game Loop │   │
+│  │  Axum    │◄─┤ WebSocket  ├─►│ Game Loop │   │
 │  │ REST API │  │ Broadcast  │  │ (2 Hz)    │   │
 │  └──────────┘  └────────────┘  └─────┬─────┘   │
 │                                       │         │
@@ -40,21 +40,36 @@ Age of Agents is an Age of Empires-inspired sandbox where every NPC is driven by
 ### Local Dev
 
 ```bash
-# Install dependencies
-pip install fastapi uvicorn websockets pydantic
+# Prerequisites: Rust toolchain (rustup)
 
-# Run the server
-uvicorn backend.server:web_app --reload --port 8000
+# Run the server directly
+cargo run --release
 
 # Open http://localhost:8000
+```
+
+### Docker
+
+```bash
+docker build -t age-of-agents .
+docker run -p 8000:8000 age-of-agents
 ```
 
 ### Modal Deploy
 
 ```bash
-# Ensure you have a Modal secret called "openrouter-api-key" with key OPENROUTER_API_KEY
 modal deploy modal_app.py
 ```
+
+The deployment uses a multi-stage Docker build (see `Dockerfile`):
+- **Stage 1** (`rust:latest`): Compiles the Cargo project in release mode
+- **Stage 2** (`debian:bookworm-slim`): Copies the binary and `frontend/` directory, exposes port 8000
+
+The Modal app (`modal_app.py`):
+- Builds the image via `modal.Image.from_dockerfile("Dockerfile")`
+- Mounts the local `frontend/` directory to `/root/frontend/` in the container (matching the path the Rust binary expects)
+- Exposes the Axum HTTP server on port 8000 using `@modal.web_server`
+- Allocates 256 MB memory with 1 warm container
 
 ## Current Status
 
@@ -62,6 +77,7 @@ modal deploy modal_app.py
 - ✅ State machine NPCs (gather, deposit, camp, wander, build)
 - ✅ Three.js 3D frontend with orbit controls
 - ✅ WebSocket real-time state broadcast
+- ✅ Rust/Axum backend with Docker + Modal deployment
 - ❌ Async LLM agent thinking — next milestone
 
 ## Roadmap
@@ -74,6 +90,6 @@ modal deploy modal_app.py
 
 ## Built With
 
-- **Backend**: Python + FastAPI + WebSockets on [Modal](https://modal.com)
+- **Backend**: Rust + Axum + WebSockets on [Modal](https://modal.com)
 - **Frontend**: Three.js with OrbitControls
 - **LLMs (future)**: OpenRouter / DeepSeek V4 Flash

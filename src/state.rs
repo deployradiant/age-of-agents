@@ -4,14 +4,28 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use rand::Rng;
 
 pub type WorldRef = Arc<Mutex<GameWorld>>;
 
+// ── Player commands (from WebSocket) ─────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct PlayerCommand {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub command: String,
+    pub agent_id: Option<String>,
+    pub resource_id: Option<String>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub name: Option<String>,
+}
+
 // ── Position ────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Point {
     pub x: f64,
     pub y: f64,
@@ -31,7 +45,7 @@ impl Point {
 
 // ── Resources ───────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ResourceKind {
     #[serde(rename = "wood")]
     Wood,
@@ -43,7 +57,7 @@ pub enum ResourceKind {
     Stone,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceNode {
     pub id: String,
     pub kind: ResourceKind,
@@ -60,7 +74,7 @@ impl ResourceNode {
 
 // ── Buildings ───────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Building {
     pub id: String,
     pub kind: String, // "town_center", "barracks", etc.
@@ -71,7 +85,7 @@ pub struct Building {
 
 // ── Agent state machine ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum AgentState {
     #[serde(rename = "active")]
     Active,
@@ -83,7 +97,7 @@ pub enum AgentState {
     Dead,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ActionType {
     #[serde(rename = "move_to")]
     MoveTo,
@@ -105,7 +119,7 @@ pub enum ActionType {
     Scout,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueuedAction {
     pub action_type: ActionType,
     pub target_id: Option<String>,
@@ -133,7 +147,7 @@ impl QueuedAction {
 
 // ── Agent ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
     pub id: String,
     pub name: String,
@@ -158,7 +172,7 @@ impl Agent {
 
 // ── Game world ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameWorld {
     pub width: f64,
     pub height: f64,
@@ -321,6 +335,67 @@ pub fn create_default_world() -> GameWorld {
 // ── Serialization helpers ───────────────────────────────────────────────
 
 impl GameWorld {
+    /// Apply a player command (from WebSocket) to the world.
+    pub fn apply_command(&mut self, cmd: &PlayerCommand) -> String {
+        match cmd.command.as_str() {
+            "move_to" => {
+                let agent_id = match &cmd.agent_id {
+                    Some(id) => id.clone(),
+                    None => return r#"{"status":"error","message":"missing agent_id"}"#.to_string(),
+                };
+                let x = match cmd.x {
+                    Some(v) => v,
+                    None => return r#"{"status":"error","message":"missing x"}"#.to_string(),
+                };
+                let y = match cmd.y {
+                    Some(v) => v,
+                    None => return r#"{"status":"error","message":"missing y"}"#.to_string(),
+                };
+                if let Some(agent) = self.agents.get_mut(&agent_id) {
+                    let travel_time = agent.position.dist(&Point::new(x, y)) / agent.speed;
+                    agent.current_action = Some(Box::new(QueuedAction::new(
+                        ActionType::MoveTo,
+                        None,
+                        Some(Point::new(x, y)),
+                        travel_time + 1.0,
+                    )));
+                    agent.state = AgentState::Active;
+                    format!(r#"{{"status":"ok","agent":"{agent_id}","command":"move_to"}}"#)
+                } else {
+                    format!(r#"{{"status":"error","message":"agent {agent_id} not found"}}"#)
+                }
+            }
+            "gather" => {
+                let agent_id = match &cmd.agent_id {
+                    Some(id) => id.clone(),
+                    None => return r#"{"status":"error","message":"missing agent_id"}"#.to_string(),
+                };
+                let resource_id = match &cmd.resource_id {
+                    Some(id) => id.clone(),
+                    None => return r#"{"status":"error","message":"missing resource_id"}"#.to_string(),
+                };
+                if let Some(agent) = self.agents.get_mut(&agent_id) {
+                    if let Some(res) = self.resources.iter().find(|r| r.id == resource_id && r.alive()) {
+                        let travel_time = agent.position.dist(&res.position) / agent.speed;
+                        agent.current_action = Some(Box::new(QueuedAction::new(
+                            ActionType::Gather,
+                            Some(resource_id),
+                            None,
+                            travel_time + 8.0,
+                        )));
+                        agent.state = AgentState::Active;
+                        format!(r#"{{"status":"ok","agent":"{agent_id}","command":"gather"}}"#)
+                    } else {
+                        format!(r#"{{"status":"error","message":"resource {resource_id} not found or depleted"}}"#)
+                    }
+                } else {
+                    format!(r#"{{"status":"error","message":"agent {agent_id} not found"}}"#)
+                }
+            }
+            _ => format!(r#"{{"status":"error","message":"unknown command: {}"}}"#, cmd.command),
+        }
+    }
+
     pub fn serialize_state(&self, events: Vec<WorldEvent>) -> WorldStateMessage {
         let mut agents = HashMap::new();
         for (id, a) in &self.agents {

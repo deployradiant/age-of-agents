@@ -19,6 +19,10 @@ futures-util = { version = "0.3", features = ["sink"] }
 # Utilities
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
+chrono = "0.4"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Logging
 tracing = "0.1"
