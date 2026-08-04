@@ -261,8 +261,8 @@ pub fn create_default_world() -> GameWorld {
 
     let mut rng = rand::thread_rng();
 
-    // Scatter resources
-    for _ in 0..20 {
+    // Scatter resources — 60 total for 20 agents
+    for _ in 0..30 {
         world.resources.push(ResourceNode {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             kind: ResourceKind::Wood,
@@ -271,7 +271,7 @@ pub fn create_default_world() -> GameWorld {
             max_amount: 100.0,
         });
     }
-    for _ in 0..8 {
+    for _ in 0..12 {
         world.resources.push(ResourceNode {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             kind: ResourceKind::Gold,
@@ -280,7 +280,7 @@ pub fn create_default_world() -> GameWorld {
             max_amount: 60.0,
         });
     }
-    for _ in 0..12 {
+    for _ in 0..18 {
         world.resources.push(ResourceNode {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             kind: ResourceKind::Food,
@@ -290,16 +290,32 @@ pub fn create_default_world() -> GameWorld {
         });
     }
 
-    // Spawn agents
+    // Spawn agents — original 5 + 15 NPC villagers
     let agent_data = vec![
-        ("aldric", "Aldric", Point::new(100.0, 400.0), "#4488ff"),
-        ("brom", "Brom", Point::new(180.0, 400.0), "#ff4488"),
-        ("cedric", "Cedric", Point::new(260.0, 400.0), "#44ff88"),
-        ("doran", "Doran", Point::new(340.0, 400.0), "#ffaa44"),
-        ("elara", "Elara", Point::new(420.0, 400.0), "#aa44ff"),
+        ("aldric", "Aldric", Point::new(100.0, 400.0), "#4488cc", 50.0),
+        ("brom", "Brom", Point::new(180.0, 400.0), "#cc4466", 55.0),
+        ("cedric", "Cedric", Point::new(260.0, 400.0), "#44bb66", 50.0),
+        ("doran", "Doran", Point::new(340.0, 400.0), "#ddaa33", 48.0),
+        ("elara", "Elara", Point::new(420.0, 400.0), "#aa44cc", 52.0),
+        // NPC villagers
+        ("finn", "Finn", Point::new(150.0, 300.0), "#6a9a7a", 45.0),
+        ("greta", "Greta", Point::new(250.0, 300.0), "#c47a4a", 42.0),
+        ("helga", "Helga", Point::new(350.0, 300.0), "#8a6aaa", 40.0),
+        ("ivar", "Ivar", Point::new(450.0, 300.0), "#4a8a9a", 48.0),
+        ("jora", "Jora", Point::new(550.0, 300.0), "#aa7a3a", 44.0),
+        ("kato", "Kato", Point::new(650.0, 300.0), "#5a7a9a", 50.0),
+        ("lena", "Lena", Point::new(750.0, 300.0), "#9a6a7a", 41.0),
+        ("milo", "Milo", Point::new(850.0, 300.0), "#6a9a5a", 46.0),
+        ("nara", "Nara", Point::new(150.0, 500.0), "#b48a5a", 43.0),
+        ("olaf", "Olaf", Point::new(250.0, 500.0), "#7a8a7a", 55.0),
+        ("pia", "Pia", Point::new(350.0, 500.0), "#ca8a8a", 39.0),
+        ("quinn", "Quinn", Point::new(450.0, 500.0), "#5a9a8a", 47.0),
+        ("rik", "Rik", Point::new(550.0, 500.0), "#9a8a5a", 52.0),
+        ("saga", "Saga", Point::new(650.0, 500.0), "#8a6a5a", 44.0),
+        ("torvi", "Torvi", Point::new(750.0, 500.0), "#6a7a9a", 48.0),
     ];
 
-    for (id, name, pos, color) in agent_data {
+    for (id, name, pos, color, speed) in agent_data {
         world.agents.insert(
             id.to_string(),
             Agent {
@@ -307,7 +323,7 @@ pub fn create_default_world() -> GameWorld {
                 name: name.to_string(),
                 position: pos,
                 state: AgentState::Idle,
-                speed: 50.0,
+                speed,
                 health: 100.0,
                 wood: 0.0,
                 gold: 0.0,
@@ -320,13 +336,20 @@ pub fn create_default_world() -> GameWorld {
         );
     }
 
-    // Starting town center
+    // Starting town centers
     world.buildings.push(Building {
         id: Uuid::new_v4().to_string()[..8].to_string(),
         kind: "town_center".to_string(),
         position: Point::new(600.0, 400.0),
         health: 100.0,
         owner: "aldric".to_string(),
+    });
+    world.buildings.push(Building {
+        id: Uuid::new_v4().to_string()[..8].to_string(),
+        kind: "town_center".to_string(),
+        position: Point::new(200.0, 200.0),
+        health: 100.0,
+        owner: "finn".to_string(),
     });
 
     world
