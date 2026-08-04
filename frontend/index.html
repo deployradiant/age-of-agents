@@ -589,17 +589,16 @@ let world = { agents: {}, resources: [], buildings: [], tick: 0, time: 0, events
 function createAgentMesh(color) {
   const group = new THREE.Group();
 
-  // Agent sprite — flat PlaneGeometry lying on the ground (isometric)
-  const spriteMat = new THREE.MeshBasicMaterial({
+  // Agent sprite — billboard always faces camera
+  const spriteMat = new THREE.SpriteMaterial({
     map: spriteTextures.agentIdle,
     transparent: true,
     depthTest: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
   });
-  const sprite = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), spriteMat);
-  sprite.rotation.x = -Math.PI / 2;
-  sprite.position.y = 0.5;
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(40, 40, 1);
+  sprite.position.y = 20;
   group.add(sprite);
 
   // Store sprite ref for animation
@@ -694,17 +693,16 @@ function createResourceMesh(kind) {
 
   const group = new THREE.Group();
 
-  // Flat isometric sprite on the ground
-  const mat = new THREE.MeshBasicMaterial({
+  // Billboard sprite — always faces camera
+  const mat = new THREE.SpriteMaterial({
     map: spriteTextures[texKey],
     transparent: true,
     depthTest: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
   });
-  const sprite = new THREE.Mesh(new THREE.PlaneGeometry(scale, scale), mat);
-  sprite.rotation.x = -Math.PI / 2;
-  sprite.position.y = 0.5;
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(scale, scale, 1);
+  sprite.position.y = 10;
   group.add(sprite);
 
   return group;
@@ -714,18 +712,16 @@ function createBuildingMesh(kind) {
   const group = new THREE.Group();
 
   if (kind === 'town_center') {
-    // Flat isometric sprite on the ground
-    const geo = new THREE.PlaneGeometry(80, 80);
-    const mat = new THREE.MeshBasicMaterial({
+    // Billboard sprite — always faces camera
+    const mat = new THREE.SpriteMaterial({
       map: spriteTextures.townCenter,
       transparent: true,
-      side: THREE.DoubleSide,
-      depthWrite: true,
+      depthWrite: false,
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.5;
-    group.add(mesh);
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(80, 80, 1);
+    sprite.position.y = 20;
+    group.add(sprite);
   }
 
   return group;
