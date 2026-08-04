@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/target/release/age-of-agents /app/age-of-agents
 
-# Copy frontend and assets (sprites, etc.)
+# Copy frontend and assets (sprites, textures, isometric)
 COPY frontend/ /app/frontend/
 COPY assets/ /app/assets/
 
