@@ -376,31 +376,54 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const spriteTextures = {};
 
 function createChromaKeyTexture(url) {
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.src = url;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = 1;
-  canvas.height = 1;
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = new THREE.CanvasTexture(createPlaceholderCanvas());
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  img.onload = () => {
-    canvas.width = img.width;
-    canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240) {
-        data[i + 3] = 0;
+
+  // Store a promise so we can wait for all textures before starting the game
+  texture.userData.ready = new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240) {
+            data[i + 3] = 0;
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+        texture.image = canvas;
+        texture.needsUpdate = true;
+      } catch (e) {
+        console.warn('Chroma-key failed for', url, e);
       }
-    }
-    ctx.putImageData(imageData, 0, 0);
-    texture.needsUpdate = true;
-  };
+      resolve(true);
+    };
+    img.onerror = () => {
+      console.warn('Failed to load sprite:', url);
+      resolve(false);
+    };
+    img.src = url;
+  });
   return texture;
+}
+
+// 1×1 dark placeholder so the scene is visible before textures arrive
+function createPlaceholderCanvas() {
+  const c = document.createElement('canvas');
+  c.width = 2;
+  c.height = 2;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#5a7a4a';
+  ctx.fillRect(0, 0, 2, 2);
+  return c;
 }
 
 // Pre-load all sprite textures at startup
@@ -420,6 +443,11 @@ function createChromaKeyTexture(url) {
     spriteTextures[key] = createChromaKeyTexture(url);
   }
 }
+
+// Promise that resolves when all sprite textures are loaded (or failed)
+const allTexturesReady = Promise.all(
+  Object.values(spriteTextures).map(t => t.userData.ready)
+);
 
 // ── DOM refs ────────────────────────────────────────────────────────────
 const container = document.getElementById('canvas-container');
@@ -1450,10 +1478,12 @@ resize();
 
 // ── Start ───────────────────────────────────────────────────────────────
 
-connectWebSocket();
-animate();
-
-console.log('🏰 Age of Agents v2 loaded — PerspectiveCamera, selection, commands, minimap, labels, mobile-friendly');
+// Wait for all sprite textures to load before starting the game loop
+allTexturesReady.then(() => {
+  connectWebSocket();
+  animate();
+  console.log('🏰 Age of Agents v2 loaded — sprites, selection, commands, minimap, mobile-friendly');
+});
 </script>
 </body>
 </html>
