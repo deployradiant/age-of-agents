@@ -122,6 +122,20 @@
     margin-bottom: 2px;
   }
 
+  /* How-to-play tutorial box */
+  .how-to-play {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #3a4a2a;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 6px 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #aabb88;
+  }
+  .how-to-play strong { color: #ccdd99; display: block; margin-bottom: 2px; font-size: 12px; }
+  .how-to-play p { margin: 0; }
+
   .agent-card {
     background: rgba(255,255,255,0.03);
     border-radius: 6px;
@@ -338,22 +352,27 @@
     <span class="toggle-arrow">▼</span>
   </div>
   <div id="hud-content">
-    <div class="panel-title">🏰 Age of Agents <small>v2</small></div>
+    <div class="panel-title">Age of Agents <small>v2</small></div>
     <div id="tick-info">Tick: 0 &nbsp;|&nbsp; Time: 0.0s &nbsp;|&nbsp; Agents: 0</div>
 
-    <div class="section-label">⚔️ Warband</div>
+    <div class="how-to-play">
+      <strong>How to Play</strong>
+      <p>Tap/click an agent to select them. Then tap the ground to move, or tap a resource to gather. Drag with middle-mouse to pan, scroll to zoom.</p>
+    </div>
+
+    <div class="section-label">Warband</div>
     <div id="agent-list"></div>
 
-    <div class="section-label">📦 Resources</div>
+    <div class="section-label">Resources</div>
     <div id="resource-count"></div>
 
     <div id="controls">
-      <button onclick="resetWorld()">🔄 Reset</button>
-      <button onclick="window.selectedAgentId=null;document.querySelectorAll('.agent-card.selected').forEach(e=>e.classList.remove('selected'));updateScene()">✕ Deselect</button>
+      <button onclick="resetWorld()">Reset</button>
+      <button onclick="window.selectedAgentId=null;document.querySelectorAll('.agent-card.selected').forEach(e=>e.classList.remove('selected'));updateScene()">Deselect</button>
     </div>
 
     <div id="event-log-container">
-      <div class="section-label" style="margin-top:0">📜 Chronicle</div>
+      <div class="section-label" style="margin-top:0">Chronicle</div>
       <div id="event-log"><div>— awaiting dispatch —</div></div>
     </div>
   </div>
@@ -509,14 +528,24 @@ controls.maxZoom = 4;
 controls.update();
 
 // ── Ground — isometric tile grid ────────────────────────────────────────
-// 20x15 grid of 60px tiles (1200x800 world area, centered on the camera target)
-const TILE_SIZE = 60;
+// 20x15 grid of tiles (1200x800 world area, centered on the camera target)
+const TILE_SIZE = 62;  // slightly larger than spacing to overlap and hide seams
+const TILE_SPACING = 60;
 const GRID_COLS = 20;
 const GRID_ROWS = 15;
 const GRID_ORIGIN_X = 0;
 const GRID_ORIGIN_Z = 0;
 
-// Chroma-keyed tile textures with nearest filtering for a crisp pixel-art look
+// Solid base ground plane so there's no black between tiles
+const baseGround = new THREE.Mesh(
+  new THREE.PlaneGeometry(1400, 1000),
+  new THREE.MeshBasicMaterial({ color: 0x3a5a3a, side: THREE.DoubleSide })
+);
+baseGround.rotation.x = -Math.PI / 2;
+baseGround.position.set(600, -0.6, 400);
+scene.add(baseGround);
+
+// Tile textures with nearest filtering for crisp pixel-art look
 for (const key of ['grass', 'dirt', 'water']) {
   spriteTextures[key].minFilter = THREE.NearestFilter;
   spriteTextures[key].magFilter = THREE.NearestFilter;
@@ -526,8 +555,8 @@ for (const key of ['grass', 'dirt', 'water']) {
 function tileTypeAt(col, row) {
   // Water fills the north-west corner (a lake), dirt a diagonal path,
   // everything else is grass
-  const x = col * TILE_SIZE;
-  const z = row * TILE_SIZE;
+  const x = col * TILE_SPACING;
+  const z = row * TILE_SPACING;
   if (x < 300 && z < 240) return 'water';
   if ((col + row) % 7 === 0) return 'dirt';
   return 'grass';
@@ -541,8 +570,8 @@ function buildGround() {
   for (let row = 0; row < GRID_ROWS; row++) {
     for (let col = 0; col < GRID_COLS; col++) {
       byType[tileTypeAt(col, row)].push({
-        x: GRID_ORIGIN_X + col * TILE_SIZE + TILE_SIZE / 2,
-        z: GRID_ORIGIN_Z + row * TILE_SIZE + TILE_SIZE / 2
+        x: GRID_ORIGIN_X + col * TILE_SPACING + TILE_SIZE / 2,
+        z: GRID_ORIGIN_Z + row * TILE_SPACING + TILE_SIZE / 2
       });
     }
   }
@@ -551,7 +580,7 @@ function buildGround() {
   for (const type of ['grass', 'dirt', 'water']) {
     const tiles = byType[type];
     if (tiles.length === 0) continue;
-    const inst = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ map: spriteTextures[type] }), tiles.length);
+    const inst = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ map: spriteTextures[type], transparent: false }), tiles.length);
     inst.userData.isGround = true;
     tiles.forEach((t, i) => {
       dummy.position.set(t.x, -0.5, t.z);
