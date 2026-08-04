@@ -248,6 +248,55 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+// ── Sprite textures ─────────────────────────────────────────────────────
+const spriteTextures = {};
+
+function createChromaKeyTexture(url) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 1;
+  canvas.height = 1;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  img.onload = () => {
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240) {
+        data[i + 3] = 0;
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+    texture.needsUpdate = true;
+  };
+  return texture;
+}
+
+// Pre-load all sprite textures at startup
+{
+  const paths = {
+    agentIdle: '/assets/sprites/agent_aldric.png',
+    agentWalk1: '/assets/sprites/agent_walk1.png',
+    agentWalk2: '/assets/sprites/agent_walk2.png',
+    agentGather: '/assets/sprites/agent_gather.png',
+    tree: '/assets/sprites/sprite_tree.png',
+    gold: '/assets/sprites/sprite_gold.png',
+    food: '/assets/sprites/sprite_bush.png',
+    townCenter: '/assets/sprites/building_towncenter.png',
+    grass: '/assets/sprites/tile_grass.png',
+  };
+  for (const [key, url] of Object.entries(paths)) {
+    spriteTextures[key] = createChromaKeyTexture(url);
+  }
+}
+
 // ── DOM refs ────────────────────────────────────────────────────────────
 const container = document.getElementById('canvas-container');
 const labelContainer = document.getElementById('label-container');
@@ -320,9 +369,13 @@ fill.position.set(-300, 200, -200);
 scene.add(fill);
 
 // ── Ground ──────────────────────────────────────────────────────────────
+const grassTex = spriteTextures.grass;
+grassTex.wrapS = THREE.RepeatWrapping;
+grassTex.wrapT = THREE.RepeatWrapping;
+grassTex.repeat.set(1400 / 128, 1000 / 128);
 const groundGeo = new THREE.PlaneGeometry(1400, 1000);
 const groundMat = new THREE.MeshStandardMaterial({
-  color: 0x1a2a1a,
+  map: grassTex,
   roughness: 0.95,
   metalness: 0.0
 });
@@ -363,53 +416,23 @@ function createAgentMesh(color) {
   shadow.position.y = 0.1;
   group.add(shadow);
 
-  // Robed body
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(7, 9, 14, 8),
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color(color),
-      roughness: 0.7,
-      metalness: 0.1
-    })
-  );
-  body.position.y = 7;
-  body.castShadow = true;
-  group.add(body);
+  // Agent sprite (billboard) — always faces camera
+  const spriteMat = new THREE.SpriteMaterial({
+    map: spriteTextures.agentIdle,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(40, 40, 1);
+  sprite.position.y = 20;
+  group.add(sprite);
 
-  // Tunic trim
-  const trim = new THREE.Mesh(
-    new THREE.CylinderGeometry(6, 8, 1, 8),
-    new THREE.MeshStandardMaterial({ color: 0x886644, roughness: 0.8 })
-  );
-  trim.position.y = 14;
-  group.add(trim);
-
-  // Head
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(5, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0xddbb99, roughness: 0.5 })
-  );
-  head.position.y = 18;
-  head.castShadow = true;
-  group.add(head);
-
-  // Hood / hat
-  const hat = new THREE.Mesh(
-    new THREE.ConeGeometry(5.5, 4, 8),
-    new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.8 })
-  );
-  hat.position.y = 22;
-  group.add(hat);
-
-  // Shoulder pads
-  for (let side = -1; side <= 1; side += 2) {
-    const pad = new THREE.Mesh(
-      new THREE.SphereGeometry(3, 6, 6),
-      new THREE.MeshStandardMaterial({ color: 0x665544, roughness: 0.6, metalness: 0.3 })
-    );
-    pad.position.set(side * 6, 14, 0);
-    group.add(pad);
-  }
+  // Store sprite ref for animation
+  group.userData.sprite = sprite;
+  group.userData.lastAnimSwap = 0;
+  group.userData.currentFrame = 0;
 
   // Selection ring — bright and visible
   const ring = new THREE.Mesh(
@@ -481,145 +504,75 @@ function createTargetMarker() {
 }
 
 function createResourceMesh(kind) {
-  const colors = { wood: 0x4a7a3a, gold: 0xffaa33, food: 0xcc6644, stone: 0x888888 };
-  const color = colors[kind] || 0x888888;
-
-  if (kind === 'wood') {
-    const group = new THREE.Group();
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(2, 3, 14, 6),
-      new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.9 })
-    );
-    trunk.position.y = 5;
-    trunk.castShadow = true;
-    group.add(trunk);
-    const foliage = new THREE.Mesh(
-      new THREE.SphereGeometry(9, 7, 7),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
-    );
-    foliage.position.y = 15;
-    foliage.castShadow = true;
-    group.add(foliage);
-    // Extra foliage
-    const f2 = new THREE.Mesh(
-      new THREE.SphereGeometry(7, 6, 6),
-      new THREE.MeshStandardMaterial({ color: 0x3a6a2a, roughness: 0.8 })
-    );
-    f2.position.set(4, 12, 4);
-    group.add(f2);
-    return group;
+  let texKey, scale;
+  if (kind === 'wood' || kind === 'tree') {
+    texKey = 'tree';
+    scale = 35;
+  } else if (kind === 'gold') {
+    texKey = 'gold';
+    scale = 28;
+  } else if (kind === 'food') {
+    texKey = 'food';
+    scale = 30;
+  } else {
+    texKey = 'tree';
+    scale = 30;
   }
 
-  if (kind === 'gold') {
-    const mesh = new THREE.Mesh(
-      new THREE.OctahedronGeometry(7),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0.8 })
-    );
-    mesh.position.y = 5;
-    mesh.castShadow = true;
-    return mesh;
-  }
+  const group = new THREE.Group();
 
-  if (kind === 'food') {
-    const group = new THREE.Group();
-    const bush = new THREE.Mesh(
-      new THREE.SphereGeometry(8, 7, 7),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
-    );
-    bush.position.y = 5;
-    bush.castShadow = true;
-    group.add(bush);
-    const berry = new THREE.Mesh(
-      new THREE.SphereGeometry(2, 4, 4),
-      new THREE.MeshStandardMaterial({ color: 0xcc3333, roughness: 0.5 })
-    );
-    berry.position.set(3, 7, 3);
-    group.add(berry);
-    const berry2 = new THREE.Mesh(
-      new THREE.SphereGeometry(2, 4, 4),
-      new THREE.MeshStandardMaterial({ color: 0xcc3333, roughness: 0.5 })
-    );
-    berry2.position.set(-3, 8, -2);
-    group.add(berry2);
-    return group;
-  }
-
-  // Stone
-  const mesh = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(6),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
+  // Shadow disc
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(scale * 0.35, 12),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.2, depthWrite: false })
   );
-  mesh.position.y = 4;
-  mesh.castShadow = true;
-  return mesh;
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.1;
+  group.add(shadow);
+
+  // Billboard sprite
+  const mat = new THREE.SpriteMaterial({
+    map: spriteTextures[texKey],
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(scale, scale, 1);
+  sprite.position.y = scale * 0.5;
+  group.add(sprite);
+
+  return group;
 }
 
 function createBuildingMesh(kind) {
-  if (kind === 'town_center') {
-    const group = new THREE.Group();
-    // Stone base
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(44, 12, 44),
-      new THREE.MeshStandardMaterial({ color: 0x7a6a5a, roughness: 0.9 })
-    );
-    base.position.y = 6;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    group.add(base);
-    // Walls
-    const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(40, 14, 40),
-      new THREE.MeshStandardMaterial({ color: 0x8a7a6a, roughness: 0.85 })
-    );
-    wall.position.y = 19;
-    wall.castShadow = true;
-    group.add(wall);
-    // Roof
-    const roof = new THREE.Mesh(
-      new THREE.ConeGeometry(30, 18, 4),
-      new THREE.MeshStandardMaterial({ color: 0x5a3a2a, roughness: 0.8 })
-    );
-    roof.position.y = 34;
-    roof.rotation.y = Math.PI / 4;
-    roof.castShadow = true;
-    group.add(roof);
-    // Banner pole
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(1, 1, 10, 6),
-      new THREE.MeshStandardMaterial({ color: 0x665544, roughness: 0.6 })
-    );
-    pole.position.y = 44;
-    group.add(pole);
-    return group;
-  }
+  const group = new THREE.Group();
 
-  if (kind === 'barracks') {
-    const group = new THREE.Group();
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(36, 10, 28),
-      new THREE.MeshStandardMaterial({ color: 0x6a5a4a, roughness: 0.9 })
-    );
-    base.position.y = 5;
-    base.castShadow = true;
-    group.add(base);
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(38, 6, 30),
-      new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.8 })
-    );
-    roof.position.y = 13;
-    roof.castShadow = true;
-    group.add(roof);
-    return group;
-  }
-
-  // Generic building
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(24, 14, 24),
-    new THREE.MeshStandardMaterial({ color: 0x6a5a4a, roughness: 0.85 })
+  // Shadow disc
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(28, 16),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false })
   );
-  mesh.position.y = 7;
-  mesh.castShadow = true;
-  return mesh;
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.1;
+  group.add(shadow);
+
+  if (kind === 'town_center') {
+    // Upright PlaneGeometry with sprite texture
+    const geo = new THREE.PlaneGeometry(60, 60);
+    const mat = new THREE.MeshBasicMaterial({
+      map: spriteTextures.townCenter,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 30;
+    group.add(mesh);
+  }
+
+  return group;
 }
 
 // ── Label helpers ──────────────────────────────────────────────────────
@@ -684,7 +637,30 @@ function updateScene() {
 
     const { group, label, targetMarker } = obj;
     group.position.set(data.x, 0, data.z !== undefined ? data.z : data.y);
-    group.rotation.y += 0.01;
+
+    // Sprite animation: cycle idle/walk1/walk2 based on action state
+    if (group.userData.sprite) {
+      const action = data.action || data.state || 'idle';
+      let frameKey;
+      if (action === 'gather') {
+        frameKey = 'agentGather';
+      } else if (action === 'move_to' || data.state === 'moving') {
+        const now = Date.now();
+        if (!group.userData.lastAnimSwap) group.userData.lastAnimSwap = now;
+        if (now - group.userData.lastAnimSwap > 250) {
+          group.userData.currentFrame = ((group.userData.currentFrame || 0) + 1) % 2;
+          group.userData.lastAnimSwap = now;
+        }
+        frameKey = group.userData.currentFrame === 0 ? 'agentWalk1' : 'agentWalk2';
+      } else {
+        frameKey = 'agentIdle';
+      }
+      const tex = spriteTextures[frameKey];
+      if (group.userData.sprite.material.map !== tex) {
+        group.userData.sprite.material.map = tex;
+        group.userData.sprite.material.needsUpdate = true;
+      }
+    }
 
     // Selection ring
     const ring = group.children.find(c => c.geometry && c.geometry.type === 'RingGeometry' && c.material.opacity !== undefined);
@@ -730,7 +706,6 @@ function updateScene() {
     mesh.position.set(r.x, 0, r.y !== undefined ? r.y : r.z !== undefined ? r.z : 0);
     const s = 0.3 + 0.7 * ((r.amount || 100) / 100);
     mesh.scale.set(s, s, s);
-    mesh.rotation.y += 0.003;
     mesh.userData.resourceId = r.id;
     mesh.userData.isResource = true;
   }
@@ -994,11 +969,21 @@ function getClickableObjects() {
     });
   }
   for (const [id, mesh] of resourceMeshes) {
+    mesh.children.forEach(child => {
+      child.userData.resourceId = id;
+      child.userData.isResource = true;
+      objects.push(child);
+    });
     mesh.userData.resourceId = id;
     mesh.userData.isResource = true;
     objects.push(mesh);
   }
   for (const [id, mesh] of buildingMeshes) {
+    mesh.children.forEach(child => {
+      child.userData.buildingId = id;
+      child.userData.isBuilding = true;
+      objects.push(child);
+    });
     mesh.userData.buildingId = id;
     mesh.userData.isBuilding = true;
     objects.push(mesh);

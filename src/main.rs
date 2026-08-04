@@ -22,6 +22,7 @@ use futures_util::{SinkExt, StreamExt};
 use rusqlite::Connection;
 use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 use tracing_subscriber::EnvFilter;
 
 use state::*;
@@ -88,9 +89,10 @@ async fn main() {
         .route("/", get(index_handler))
         .route("/reset", post(reset_handler))
         .route("/state", get(state_handler))
-        .route("/ws", get(ws_handler))
         .route("/save", post(save_handler))
-        .layer(cors)
+                .route("/ws", get(ws_handler))
+                .nest_service("/assets", ServeDir::new("assets"))
+                .layer(cors)
         .with_state(state);
 
     let addr = "0.0.0.0:8000";
