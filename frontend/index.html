@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Age of Agents</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -20,6 +20,10 @@
     flex: 1;
     position: relative;
     overflow: hidden;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   #canvas-container canvas { display: block; }
 
@@ -204,6 +208,120 @@
   #conn-status.connected { background: #44cc66; box-shadow: 0 0 8px rgba(68,204,102,0.4); }
   #conn-status.disconnected { background: #cc4444; box-shadow: 0 0 8px rgba(204,68,68,0.4); }
   #conn-status.connecting { background: #ccaa44; box-shadow: 0 0 8px rgba(204,170,68,0.4); }
+
+  /* ── HUD toggle (hidden on desktop) ─────────────────────── */
+  #hud-toggle { display: none; }
+
+  /* ── Mobile responsive ──────────────────────────────────── */
+  @media (max-width: 768px) {
+    body {
+      flex-direction: column;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 100vh;
+    }
+
+    #minimap-container {
+      width: 100px;
+      height: 75px;
+      bottom: 56px;
+      right: 8px;
+    }
+
+    #hud {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      height: auto;
+      max-height: 55vh;
+      border-left: none;
+      border-top: 2px solid #3a2a1a;
+      border-radius: 12px 12px 0 0;
+      padding: 0;
+      font-size: 11px;
+      z-index: 30;
+      overflow: visible;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.6);
+      transform: translateY(calc(100% - 44px));
+      transition: transform 0.3s ease;
+    }
+    #hud.expanded {
+      transform: translateY(0);
+      overflow-y: auto;
+    }
+
+    #hud-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      cursor: pointer;
+      min-height: 44px;
+      background: linear-gradient(180deg, rgba(16,12,28,0.97), rgba(10,8,20,0.97));
+      border-radius: 12px 12px 0 0;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      flex-shrink: 0;
+    }
+    #hud-toggle .toggle-arrow {
+      transition: transform 0.3s;
+      font-size: 14px;
+      color: #d4a846;
+    }
+    #hud.expanded #hud-toggle .toggle-arrow {
+      transform: rotate(180deg);
+    }
+    #hud-tick-mini {
+      font-size: 10px;
+      color: #887755;
+      font-family: monospace;
+      flex: 1;
+    }
+
+    #hud-content {
+      padding: 0 14px 14px;
+      overflow-y: auto;
+      max-height: calc(55vh - 44px);
+    }
+    #hud.expanded #hud-content {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* Labels larger on mobile */
+    .agent-label {
+      font-size: 13px;
+    }
+
+    /* Smaller HUD text on mobile */
+    #hud .panel-title { font-size: 13px; }
+    #hud .panel-title small { font-size: 9px; }
+    .section-label { font-size: 10px; }
+    .agent-card .name { font-size: 11px; }
+    .agent-card .status { font-size: 9px; }
+    .agent-card .resources { font-size: 9px; }
+    #tick-info { font-size: 10px; }
+    #resource-count { font-size: 10px; }
+    #controls button { font-size: 10px; padding: 6px 10px; }
+    #event-log { font-size: 9px; }
+    #event-log { max-height: 80px; }
+
+    /* Controls bar at bottom of expanded HUD */
+    #controls {
+      position: sticky;
+      bottom: 0;
+      background: rgba(10,8,20,0.95);
+      padding: 8px 0 4px;
+      margin-top: 6px;
+      margin-bottom: 0;
+      border-top: 1px solid #2a1a0a;
+    }
+  }
 </style>
 </head>
 <body>
@@ -215,23 +333,29 @@
 </div>
 
 <div id="hud">
-  <div class="panel-title">🏰 Age of Agents <small>v2</small></div>
-  <div id="tick-info">Tick: 0 &nbsp;|&nbsp; Time: 0.0s &nbsp;|&nbsp; Agents: 0</div>
-
-  <div class="section-label">⚔️ Warband</div>
-  <div id="agent-list"></div>
-
-  <div class="section-label">📦 Resources</div>
-  <div id="resource-count"></div>
-
-  <div id="controls">
-    <button onclick="resetWorld()">🔄 Reset</button>
-    <button onclick="window.selectedAgentId=null;document.querySelectorAll('.agent-card.selected').forEach(e=>e.classList.remove('selected'));updateScene()">✕ Deselect</button>
+  <div id="hud-toggle">
+    <span id="hud-tick-mini">Tick: 0 | Time: 0.0s | Agents: 0</span>
+    <span class="toggle-arrow">▼</span>
   </div>
+  <div id="hud-content">
+    <div class="panel-title">🏰 Age of Agents <small>v2</small></div>
+    <div id="tick-info">Tick: 0 &nbsp;|&nbsp; Time: 0.0s &nbsp;|&nbsp; Agents: 0</div>
 
-  <div id="event-log-container">
-    <div class="section-label" style="margin-top:0">📜 Chronicle</div>
-    <div id="event-log"><div>— awaiting dispatch —</div></div>
+    <div class="section-label">⚔️ Warband</div>
+    <div id="agent-list"></div>
+
+    <div class="section-label">📦 Resources</div>
+    <div id="resource-count"></div>
+
+    <div id="controls">
+      <button onclick="resetWorld()">🔄 Reset</button>
+      <button onclick="window.selectedAgentId=null;document.querySelectorAll('.agent-card.selected').forEach(e=>e.classList.remove('selected'));updateScene()">✕ Deselect</button>
+    </div>
+
+    <div id="event-log-container">
+      <div class="section-label" style="margin-top:0">📜 Chronicle</div>
+      <div id="event-log"><div>— awaiting dispatch —</div></div>
+    </div>
   </div>
 </div>
 
@@ -307,6 +431,15 @@ const resourceCount = document.getElementById('resource-count');
 const connStatus = document.getElementById('conn-status');
 const minimapCanvas = document.getElementById('minimap-canvas');
 const minimapCtx = minimapCanvas.getContext('2d');
+const hud = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+const hudTickMini = document.getElementById('hud-tick-mini');
+
+// ── HUD toggle (mobile) ─────────────────────────────────────────────────
+function toggleHud() {
+  hud.classList.toggle('expanded');
+}
+hudToggle.addEventListener('click', toggleHud);
 
 // ── Scene setup ─────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -394,6 +527,13 @@ scene.add(gridHelper);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const mouse = new THREE.Vector2();
+
+// ── Double-tap tracking ─────────────────────────────────────────────────
+let lastTapTime = 0;
+let lastTapX = 0;
+let lastTapY = 0;
+const DOUBLE_TAP_DELAY = 300;
+const DOUBLE_TAP_DIST = 30;
 
 // ── Game objects ────────────────────────────────────────────────────────
 const agentMeshes = new Map();  // id -> {group, ring, label, targetMarker, data}
@@ -888,7 +1028,9 @@ function getCameraFrustum() {
 
 function updateHUD() {
   const agentCount = Object.keys(world.agents).length;
-  tickInfo.textContent = `Tick: ${world.tick} | Time: ${(world.time || 0).toFixed(1)}s | Agents: ${agentCount}`;
+  const tickStr = `Tick: ${world.tick} | Time: ${(world.time || 0).toFixed(1)}s | Agents: ${agentCount}`;
+  tickInfo.textContent = tickStr;
+  hudTickMini.textContent = tickStr;
 
   // Agent cards
   agentList.innerHTML = '';
@@ -997,6 +1139,47 @@ function getClickableObjects() {
   return objects;
 }
 
+// ── Helper: send command (move or gather) ───────────────────────────────
+function sendMoveCommand(agentId, x, z) {
+  const agent = world.agents[agentId];
+  if (!agent) return;
+  wsSend({
+    type: 'command',
+    command: 'move_to',
+    agent_id: agentId,
+    x: x,
+    y: z
+  });
+  addEvent('Moving ' + (agent.name || 'agent') + ' to (' + x.toFixed(0) + ', ' + z.toFixed(0) + ')');
+}
+
+function sendGatherCommand(agentId, resourceId) {
+  const agent = world.agents[agentId];
+  if (!agent) return;
+  const resource = world.resources.find(r => r.id === resourceId);
+  if (!resource) return;
+  wsSend({
+    type: 'command',
+    command: 'gather',
+    agent_id: agentId,
+    resource_id: resourceId
+  });
+  addEvent('Ordered ' + (agent.name || 'agent') + ' to gather ' + (resource.kind || 'resource'));
+}
+
+// ── Helper: get ground intersection point ───────────────────────────────
+function getGroundPoint(screenX, screenY) {
+  const rect = container.getBoundingClientRect();
+  const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+  const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+  const tempRay = new THREE.Raycaster();
+  tempRay.setFromCamera(new THREE.Vector2(nx, ny), camera);
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const point = new THREE.Vector3();
+  const hit = tempRay.ray.intersectPlane(groundPlane, point);
+  return hit ? point : null;
+}
+
 // ── Click / Raycasting ─────────────────────────────────────────────────
 
 function onPointerDown(event) {
@@ -1047,57 +1230,85 @@ function onPointerUp(event) {
     if (hitAgent || hitResource || hitBuilding) break;
   }
 
-  // Left click: select
-  if (event.button === 0) {
+  const isTouch = event.pointerType === 'touch';
+
+  if (isTouch) {
+    // ── Touch handling ──
+    // Double-tap detection
+    const now = Date.now();
+    const timeSinceLast = now - lastTapTime;
+    const distSinceLast = Math.sqrt(
+      (event.clientX - lastTapX) ** 2 + (event.clientY - lastTapY) ** 2
+    );
+    lastTapTime = now;
+    lastTapX = event.clientX;
+    lastTapY = event.clientY;
+
+    const isDoubleTap = timeSinceLast < DOUBLE_TAP_DELAY && distSinceLast < DOUBLE_TAP_DIST;
+
+    if (isDoubleTap) {
+      // Double-tap: zoom to location
+      const pt = getGroundPoint(event.clientX, event.clientY);
+      if (pt) {
+        // Animate camera to zoom in on this point
+        controls.target.set(pt.x, 0, pt.z);
+        // Move camera closer (above the target)
+        camera.position.set(pt.x + 80, 200, pt.z + 120);
+        controls.update();
+        addEvent('Zoomed to (' + pt.x.toFixed(0) + ', ' + pt.z.toFixed(0) + ')');
+      }
+      return;
+    }
+
+    // Single tap
     if (hitAgent && world.agents[hitAgent]) {
+      // Tap on agent = select
       selectAgent(hitAgent);
+    } else if (hitResource && selectedAgentId && world.agents[selectedAgentId]) {
+      // Tap on resource with agent selected = gather
+      sendGatherCommand(selectedAgentId, hitResource);
+    } else if (selectedAgentId && world.agents[selectedAgentId]) {
+      // Tap on ground with agent selected = move
+      const pt = getGroundPoint(event.clientX, event.clientY);
+      if (pt) {
+        sendMoveCommand(selectedAgentId, pt.x, pt.z);
+      }
     } else {
-      // Click ground = deselect
+      // Tap on ground with no selection = deselect (no-op if already none)
       selectedAgentId = null;
       document.querySelectorAll('.agent-card.selected').forEach(e => e.classList.remove('selected'));
       updateScene();
     }
-  }
-
-  // Right click: command
-  if (event.button === 2 && selectedAgentId && world.agents[selectedAgentId]) {
-    const agent = world.agents[selectedAgentId];
-    if (!agent) return;
-
-    if (hitResource) {
-      // Gather
-      const resource = world.resources.find(r => r.id === hitResource);
-      if (resource) {
-        wsSend({
-          type: 'command',
-          command: 'gather',
-          agent_id: selectedAgentId,
-          resource_id: hitResource
-        });
-        addEvent('Ordered ' + (agent.name || 'agent') + ' to gather ' + (resource.kind || 'resource'));
+  } else {
+    // ── Mouse handling (unchanged) ──
+    // Left click: select
+    if (event.button === 0) {
+      if (hitAgent && world.agents[hitAgent]) {
+        selectAgent(hitAgent);
+      } else {
+        // Click ground = deselect
+        selectedAgentId = null;
+        document.querySelectorAll('.agent-card.selected').forEach(e => e.classList.remove('selected'));
+        updateScene();
       }
-    } else if (hitAgent) {
-      // Click on another agent — could be attack in future, for now just select
-      selectAgent(hitAgent);
-    } else {
-      // Move to ground position
-      // Intersect with ground plane
-      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const raycaster2 = new THREE.Raycaster();
-      raycaster2.setFromCamera(new THREE.Vector2(upX, upY), camera);
-      const intersectionPoint = new THREE.Vector3();
-      const ray = raycaster2.ray;
-      const intersectPoint = ray.intersectPlane(groundPlane, intersectionPoint);
+    }
 
-      if (intersectPoint) {
-        wsSend({
-          type: 'command',
-          command: 'move_to',
-          agent_id: selectedAgentId,
-          x: intersectPoint.x,
-          y: intersectPoint.z
-        });
-        addEvent('Moving ' + (agent.name || 'agent') + ' to (' + intersectPoint.x.toFixed(0) + ', ' + intersectPoint.z.toFixed(0) + ')');
+    // Right click: command
+    if (event.button === 2 && selectedAgentId && world.agents[selectedAgentId]) {
+      const agent = world.agents[selectedAgentId];
+      if (!agent) return;
+
+      if (hitResource) {
+        sendGatherCommand(selectedAgentId, hitResource);
+      } else if (hitAgent) {
+        // Click on another agent — could be attack in future, for now just select
+        selectAgent(hitAgent);
+      } else {
+        // Move to ground position
+        const pt = getGroundPoint(event.clientX, event.clientY);
+        if (pt) {
+          sendMoveCommand(selectedAgentId, pt.x, pt.z);
+        }
       }
     }
   }
@@ -1173,6 +1384,19 @@ container.addEventListener('pointerdown', onPointerDown);
 container.addEventListener('pointerup', onPointerUp);
 container.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// Prevent default touch behaviors (scroll, zoom, long-press context menu)
+container.addEventListener('touchstart', (e) => {
+  if (e.target === container || e.target === renderer.domElement) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
+container.addEventListener('touchmove', (e) => {
+  if (e.target === container || e.target === renderer.domElement) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
 // ── Animation loop ──────────────────────────────────────────────────────
 
 function animate() {
@@ -1229,7 +1453,7 @@ resize();
 connectWebSocket();
 animate();
 
-console.log('🏰 Age of Agents v2 loaded — PerspectiveCamera, selection, commands, minimap, labels');
+console.log('🏰 Age of Agents v2 loaded — PerspectiveCamera, selection, commands, minimap, labels, mobile-friendly');
 </script>
 </body>
 </html>
