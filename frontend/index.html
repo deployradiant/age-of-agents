@@ -580,7 +580,7 @@ function buildGround() {
   for (const type of ['grass', 'dirt', 'water']) {
     const tiles = byType[type];
     if (tiles.length === 0) continue;
-    const inst = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ map: spriteTextures[type], transparent: false }), tiles.length);
+    const inst = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ map: spriteTextures[type], transparent: true, depthWrite: false }), tiles.length);
     inst.userData.isGround = true;
     tiles.forEach((t, i) => {
       dummy.position.set(t.x, -0.5, t.z);
