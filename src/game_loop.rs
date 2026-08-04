@@ -1,5 +1,4 @@
 /// Game loop — 2 Hz tick with agent state machine.
-
 use rand::Rng;
 use uuid::Uuid;
 
@@ -84,7 +83,12 @@ fn tick_agent(world: &mut GameWorld, agent_id: &str, dt: f64, events: &mut Vec<W
 
 /// After tick_agent advances progress, execute_action is called separately
 /// with the action already borrowed from world. This avoids NLL issues.
-pub fn run_execute_action(world: &mut GameWorld, agent_id: &str, dt: f64, events: &mut Vec<WorldEvent>) {
+pub fn run_execute_action(
+    world: &mut GameWorld,
+    agent_id: &str,
+    dt: f64,
+    events: &mut Vec<WorldEvent>,
+) {
     // Only execute when agent is Active and has an action
     let action_type = {
         let agent = match world.agents.get(agent_id) {
@@ -159,7 +163,7 @@ fn choose_next_action(world: &mut GameWorld, agent_id: &str) {
     // Priority 3: gather nearest resource
     if let Some(resource) = nearest_resource(world, &agent) {
         let travel_time = agent.position.dist(&resource.position) / agent.speed;
-        let res_id = resource.id.clone();  // clone before mutable borrow
+        let res_id = resource.id.clone(); // clone before mutable borrow
         let a = world.agents.get_mut(agent_id).unwrap();
         a.current_action = Some(Box::new(QueuedAction::new(
             ActionType::Gather,
@@ -241,7 +245,10 @@ fn exec_gather(world: &mut GameWorld, agent_id: &str, dt: f64, events: &mut Vec<
     };
 
     // Find resource index
-    let res_idx = world.resources.iter().position(|r| r.id == target_id && r.alive());
+    let res_idx = world
+        .resources
+        .iter()
+        .position(|r| r.id == target_id && r.alive());
 
     let res_idx = match res_idx {
         Some(idx) => idx,
@@ -341,13 +348,22 @@ fn exec_deposit(world: &mut GameWorld, agent_id: &str, dt: f64, events: &mut Vec
         }
     }
 
-    // Deposit
-    let agent = world.agents.get_mut(agent_id).unwrap();
-    let total = agent.wood + agent.gold + agent.stone + agent.food;
-    agent.wood = 0.0;
-    agent.gold = 0.0;
-    agent.stone = 0.0;
-    agent.food = 0.0;
+    // Deposit everything the villager is carrying into the shared stockpile.
+    let (wood, gold, stone, food) = {
+        let agent = world.agents.get_mut(agent_id).unwrap();
+        let carried = (agent.wood, agent.gold, agent.stone, agent.food);
+        agent.wood = 0.0;
+        agent.gold = 0.0;
+        agent.stone = 0.0;
+        agent.food = 0.0;
+        carried
+    };
+    world.stockpile.wood += wood;
+    world.stockpile.gold += gold;
+    world.stockpile.stone += stone;
+    world.stockpile.food += food;
+
+    let total = wood + gold + stone + food;
 
     if total > 0.0 {
         events.push(WorldEvent {
@@ -407,25 +423,31 @@ fn exec_build(world: &mut GameWorld, agent_id: &str, dt: f64, events: &mut Vec<W
         }
     }
 
-    // Build
-    let agent = world.agents.get_mut(agent_id).unwrap();
-    if agent.wood >= 50.0 {
-        agent.wood -= 50.0;
-        let building = Building {
-            id: Uuid::new_v4().to_string()[..8].to_string(),
-            kind: "town_center".to_string(),
-            position: target,
-            health: 100.0,
-            owner: agent.id.clone(),
-        };
-        world.buildings.push(building);
-        events.push(WorldEvent {
-            event_type: "built".to_string(),
-            agent_id: Some(agent_id.to_string()),
-            resource: None,
-            amount: None,
-        });
-    }
+    // The command reserves its shared-stockpile cost up front. Reaching the
+    // site completes that reservation without charging the villager again.
+    let (owner, building_kind) = {
+        let agent = world.agents.get(agent_id).unwrap();
+        let kind = agent
+            .current_action
+            .as_ref()
+            .and_then(|action| action.target_id.clone())
+            .unwrap_or_else(|| "barracks".to_string());
+        (agent.id.clone(), kind)
+    };
+    let building = Building {
+        id: Uuid::new_v4().to_string()[..8].to_string(),
+        kind: building_kind.clone(),
+        position: target,
+        health: 100.0,
+        owner,
+    };
+    world.buildings.push(building);
+    events.push(WorldEvent {
+        event_type: "built".to_string(),
+        agent_id: Some(agent_id.to_string()),
+        resource: Some(building_kind),
+        amount: None,
+    });
 
     if let Some(ref mut action) = world.agents.get_mut(agent_id).unwrap().current_action {
         action.progress = action.duration_seconds;
@@ -448,13 +470,84 @@ fn nearest_town_center(world: &GameWorld, agent: &Agent) -> Option<Point> {
 }
 
 fn nearest_resource<'a>(world: &'a GameWorld, agent: &Agent) -> Option<&'a ResourceNode> {
-    world
-        .resources
-        .iter()
-        .filter(|r| r.alive())
-        .min_by(|a, b| {
-            let da = agent.position.dist(&a.position);
-            let db = agent.position.dist(&b.position);
-            da.partial_cmp(&db).unwrap()
-        })
+    world.resources.iter().filter(|r| r.alive()).min_by(|a, b| {
+        let da = agent.position.dist(&a.position);
+        let db = agent.position.dist(&b.position);
+        da.partial_cmp(&db).unwrap()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deposit_transfers_every_carried_resource_to_the_stockpile() {
+        let mut world = GameWorld::new();
+        world.buildings.push(Building {
+            id: "tc".to_string(),
+            kind: "town_center".to_string(),
+            position: Point::new(100.0, 100.0),
+            health: 100.0,
+            owner: "villager".to_string(),
+        });
+        world.agents.insert(
+            "villager".to_string(),
+            Agent {
+                id: "villager".to_string(),
+                name: "Villager".to_string(),
+                position: Point::new(100.0, 100.0),
+                state: AgentState::Active,
+                speed: 50.0,
+                health: 100.0,
+                wood: 12.0,
+                gold: 8.0,
+                stone: 4.0,
+                food: 6.0,
+                color: "#fff".to_string(),
+                current_action: Some(Box::new(QueuedAction::new(
+                    ActionType::Deposit,
+                    None,
+                    Some(Point::new(100.0, 100.0)),
+                    1.0,
+                ))),
+                action_queue: Vec::new(),
+            },
+        );
+
+        run_execute_action(&mut world, "villager", 0.5, &mut Vec::new());
+
+        assert_eq!(world.stockpile.wood, 12.0);
+        assert_eq!(world.stockpile.gold, 8.0);
+        assert_eq!(world.stockpile.stone, 4.0);
+        assert_eq!(world.stockpile.food, 6.0);
+        assert_eq!(world.agents["villager"].carry_weight(), 0.0);
+    }
+
+    #[test]
+    fn accepted_build_order_creates_a_barracks_without_a_second_charge() {
+        let mut world = create_default_world();
+        let command = PlayerCommand {
+            msg_type: "command".to_string(),
+            command: "build_barracks".to_string(),
+            agent_id: Some("aldric".to_string()),
+            resource_id: None,
+            x: Some(500.0),
+            y: Some(350.0),
+            name: None,
+        };
+        world.apply_command(&command);
+        let wood_after_order = world.stockpile.wood;
+        world.agents.get_mut("aldric").unwrap().position = Point::new(500.0, 350.0);
+
+        run_execute_action(&mut world, "aldric", 0.5, &mut Vec::new());
+
+        assert_eq!(world.stockpile.wood, wood_after_order);
+        assert!(
+            world
+                .buildings
+                .iter()
+                .any(|building| building.kind == "barracks")
+        );
+    }
 }

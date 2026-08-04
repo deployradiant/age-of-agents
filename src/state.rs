@@ -1,13 +1,15 @@
+use rand::Rng;
+use serde::{Deserialize, Serialize};
 /// Game world state — agents, resources, buildings, and actions.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
-use rand::Rng;
 
 pub type WorldRef = Arc<Mutex<GameWorld>>;
+
+pub const BARRACKS_WOOD_COST: f64 = 100.0;
+pub const BARRACKS_BUILD_SECONDS: f64 = 6.0;
 
 // ── Player commands (from WebSocket) ─────────────────────────────────────
 
@@ -70,6 +72,16 @@ impl ResourceNode {
     pub fn alive(&self) -> bool {
         self.amount > 0.0
     }
+}
+
+/// Resources available to the whole village. Villagers carry resources while
+/// gathering, then transfer them here when they reach a town center.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ResourceStockpile {
+    pub wood: f64,
+    pub gold: f64,
+    pub food: f64,
+    pub stone: f64,
 }
 
 // ── Buildings ───────────────────────────────────────────────────────────
@@ -179,6 +191,8 @@ pub struct GameWorld {
     pub agents: HashMap<String, Agent>,
     pub resources: Vec<ResourceNode>,
     pub buildings: Vec<Building>,
+    #[serde(default)]
+    pub stockpile: ResourceStockpile,
     pub tick_count: u64,
     pub time_elapsed: f64,
 }
@@ -191,6 +205,7 @@ impl GameWorld {
             agents: HashMap::new(),
             resources: Vec::new(),
             buildings: Vec::new(),
+            stockpile: ResourceStockpile::default(),
             tick_count: 0,
             time_elapsed: 0.0,
         }
@@ -251,6 +266,7 @@ pub struct WorldStateMessage {
     pub agents: HashMap<String, SerializedAgent>,
     pub resources: Vec<SerializedResource>,
     pub buildings: Vec<SerializedBuilding>,
+    pub stockpile: ResourceStockpile,
     pub events: Vec<WorldEvent>,
 }
 
@@ -258,6 +274,10 @@ pub struct WorldStateMessage {
 
 pub fn create_default_world() -> GameWorld {
     let mut world = GameWorld::new();
+
+    // Enough lumber for an opening barracks so the build command is usable
+    // immediately; future resources come from villager deposits.
+    world.stockpile.wood = 200.0;
 
     let mut rng = rand::thread_rng();
 
@@ -292,9 +312,21 @@ pub fn create_default_world() -> GameWorld {
 
     // Spawn agents — original 5 + 15 NPC villagers
     let agent_data = vec![
-        ("aldric", "Aldric", Point::new(100.0, 400.0), "#4488cc", 50.0),
+        (
+            "aldric",
+            "Aldric",
+            Point::new(100.0, 400.0),
+            "#4488cc",
+            50.0,
+        ),
         ("brom", "Brom", Point::new(180.0, 400.0), "#cc4466", 55.0),
-        ("cedric", "Cedric", Point::new(260.0, 400.0), "#44bb66", 50.0),
+        (
+            "cedric",
+            "Cedric",
+            Point::new(260.0, 400.0),
+            "#44bb66",
+            50.0,
+        ),
         ("doran", "Doran", Point::new(340.0, 400.0), "#ddaa33", 48.0),
         ("elara", "Elara", Point::new(420.0, 400.0), "#aa44cc", 52.0),
         // NPC villagers
@@ -364,7 +396,9 @@ impl GameWorld {
             "move_to" => {
                 let agent_id = match &cmd.agent_id {
                     Some(id) => id.clone(),
-                    None => return r#"{"status":"error","message":"missing agent_id"}"#.to_string(),
+                    None => {
+                        return r#"{"status":"error","message":"missing agent_id"}"#.to_string();
+                    }
                 };
                 let x = match cmd.x {
                     Some(v) => v,
@@ -391,14 +425,22 @@ impl GameWorld {
             "gather" => {
                 let agent_id = match &cmd.agent_id {
                     Some(id) => id.clone(),
-                    None => return r#"{"status":"error","message":"missing agent_id"}"#.to_string(),
+                    None => {
+                        return r#"{"status":"error","message":"missing agent_id"}"#.to_string();
+                    }
                 };
                 let resource_id = match &cmd.resource_id {
                     Some(id) => id.clone(),
-                    None => return r#"{"status":"error","message":"missing resource_id"}"#.to_string(),
+                    None => {
+                        return r#"{"status":"error","message":"missing resource_id"}"#.to_string();
+                    }
                 };
                 if let Some(agent) = self.agents.get_mut(&agent_id) {
-                    if let Some(res) = self.resources.iter().find(|r| r.id == resource_id && r.alive()) {
+                    if let Some(res) = self
+                        .resources
+                        .iter()
+                        .find(|r| r.id == resource_id && r.alive())
+                    {
                         let travel_time = agent.position.dist(&res.position) / agent.speed;
                         agent.current_action = Some(Box::new(QueuedAction::new(
                             ActionType::Gather,
@@ -409,13 +451,66 @@ impl GameWorld {
                         agent.state = AgentState::Active;
                         format!(r#"{{"status":"ok","agent":"{agent_id}","command":"gather"}}"#)
                     } else {
-                        format!(r#"{{"status":"error","message":"resource {resource_id} not found or depleted"}}"#)
+                        format!(
+                            r#"{{"status":"error","message":"resource {resource_id} not found or depleted"}}"#
+                        )
                     }
                 } else {
                     format!(r#"{{"status":"error","message":"agent {agent_id} not found"}}"#)
                 }
             }
-            _ => format!(r#"{{"status":"error","message":"unknown command: {}"}}"#, cmd.command),
+            "build_barracks" => {
+                let agent_id = match &cmd.agent_id {
+                    Some(id) => id.clone(),
+                    None => {
+                        return r#"{"status":"error","message":"missing agent_id"}"#.to_string();
+                    }
+                };
+                let x = match cmd.x {
+                    Some(v) => v,
+                    None => return r#"{"status":"error","message":"missing x"}"#.to_string(),
+                };
+                let y = match cmd.y {
+                    Some(v) => v,
+                    None => return r#"{"status":"error","message":"missing y"}"#.to_string(),
+                };
+
+                if !(20.0..=self.width - 20.0).contains(&x)
+                    || !(20.0..=self.height - 20.0).contains(&y)
+                {
+                    return r#"{"status":"error","message":"build site is outside the world"}"#
+                        .to_string();
+                }
+                if self.stockpile.wood < BARRACKS_WOOD_COST {
+                    return format!(
+                        r#"{{"status":"error","message":"need {} wood to build a barracks"}}"#,
+                        BARRACKS_WOOD_COST as u32
+                    );
+                }
+
+                if let Some(agent) = self.agents.get_mut(&agent_id) {
+                    let target = Point::new(x, y);
+                    let travel_time = agent.position.dist(&target) / agent.speed;
+                    self.stockpile.wood -= BARRACKS_WOOD_COST;
+                    agent.current_action = Some(Box::new(QueuedAction::new(
+                        ActionType::Build,
+                        Some("barracks".to_string()),
+                        Some(target),
+                        travel_time + BARRACKS_BUILD_SECONDS,
+                    )));
+                    agent.state = AgentState::Active;
+                    format!(
+                        r#"{{"status":"ok","agent":"{agent_id}","command":"build_barracks","wood_cost":{}}}"#,
+                        BARRACKS_WOOD_COST as u32
+                    )
+                } else {
+                    format!(r#"{{"status":"error","message":"agent {agent_id} not found"}}"#)
+                }
+            }
+            _ => format!(
+                r#"{{"status":"error","message":"unknown command: {}"}}"#,
+                cmd.command
+            ),
         }
     }
 
@@ -481,7 +576,73 @@ impl GameWorld {
             agents,
             resources,
             buildings,
+            stockpile: ResourceStockpile {
+                wood: (self.stockpile.wood * 10.0).round() / 10.0,
+                gold: (self.stockpile.gold * 10.0).round() / 10.0,
+                food: (self.stockpile.food * 10.0).round() / 10.0,
+                stone: (self.stockpile.stone * 10.0).round() / 10.0,
+            },
             events,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_barracks_command_charges_shared_wood_and_queues_builder() {
+        let mut world = create_default_world();
+        let initial_wood = world.stockpile.wood;
+        let command = PlayerCommand {
+            msg_type: "command".to_string(),
+            command: "build_barracks".to_string(),
+            agent_id: Some("aldric".to_string()),
+            resource_id: None,
+            x: Some(500.0),
+            y: Some(350.0),
+            name: None,
+        };
+
+        let response = world.apply_command(&command);
+
+        assert!(response.contains(r#""status":"ok""#));
+        assert_eq!(world.stockpile.wood, initial_wood - BARRACKS_WOOD_COST);
+        let action = world.agents["aldric"].current_action.as_ref().unwrap();
+        assert_eq!(action.action_type, ActionType::Build);
+        assert_eq!(action.target_id.as_deref(), Some("barracks"));
+    }
+
+    #[test]
+    fn build_barracks_command_rejects_an_empty_stockpile() {
+        let mut world = create_default_world();
+        world.stockpile.wood = BARRACKS_WOOD_COST - 1.0;
+        let command = PlayerCommand {
+            msg_type: "command".to_string(),
+            command: "build_barracks".to_string(),
+            agent_id: Some("aldric".to_string()),
+            resource_id: None,
+            x: Some(500.0),
+            y: Some(350.0),
+            name: None,
+        };
+
+        let response = world.apply_command(&command);
+
+        assert!(response.contains("need 100 wood"));
+        assert_eq!(world.stockpile.wood, BARRACKS_WOOD_COST - 1.0);
+        assert!(world.agents["aldric"].current_action.is_none());
+    }
+
+    #[test]
+    fn old_saves_without_a_stockpile_still_load() {
+        let world = create_default_world();
+        let mut value = serde_json::to_value(world).unwrap();
+        value.as_object_mut().unwrap().remove("stockpile");
+
+        let loaded: GameWorld = serde_json::from_value(value).unwrap();
+
+        assert_eq!(loaded.stockpile, ResourceStockpile::default());
     }
 }
