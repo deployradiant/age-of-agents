@@ -527,16 +527,18 @@ controls.minZoom = 0.25;
 controls.maxZoom = 4;
 controls.update();
 
-// ── Ground — isometric tile grid ────────────────────────────────────────
-// 20x15 grid of tiles (1200x800 world area, centered on the camera target)
-const TILE_SIZE = 62;  // slightly larger than spacing to overlap and hide seams
+// ── Ground — isometric tile grid with diamond interlocking ─────────────
+// 20x15 grid (1200x800 world area). Uses painter's algorithm: tiles further
+// from camera are rendered first, so their diamonds show through closer
+// tiles' transparent corners.
+const TILE_SIZE = 62;  // 2px larger than spacing → diamond corners overlap
 const TILE_SPACING = 60;
 const GRID_COLS = 20;
 const GRID_ROWS = 15;
 const GRID_ORIGIN_X = 0;
 const GRID_ORIGIN_Z = 0;
 
-// Solid base ground plane so there's no black between tiles
+// Solid base ground plane (dark green — barely visible through diamond gaps)
 const baseGround = new THREE.Mesh(
   new THREE.PlaneGeometry(1400, 1000),
   new THREE.MeshBasicMaterial({ color: 0x3a5a3a, side: THREE.DoubleSide })
@@ -544,6 +546,36 @@ const baseGround = new THREE.Mesh(
 baseGround.rotation.x = -Math.PI / 2;
 baseGround.position.set(600, -0.6, 400);
 scene.add(baseGround);
+
+// Create a shared diamond alpha map — white diamond on black background.
+// This is applied as alphaMap on every tile, making the four corner
+// triangles transparent so adjacent tiles' diamonds interlock.
+function createDiamondAlphaMap(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  // Clear to black (fully transparent)
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, size, size);
+  // Draw a white diamond — the diamond extends to the edge midpoints so
+  // the 2px overlap (62 vs 60) creates 1px content bleed on each side
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(size / 2, 0);           // top midpoint
+  ctx.lineTo(size - 1, size / 2);     // right midpoint (use -1 to avoid edge)
+  ctx.lineTo(size / 2, size - 1);     // bottom midpoint
+  ctx.lineTo(0, size / 2);           // left midpoint
+  ctx.closePath();
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+const diamondAlphaMap = createDiamondAlphaMap(TILE_SIZE);
 
 // Tile textures with nearest filtering for crisp pixel-art look
 for (const key of ['grass', 'dirt', 'water']) {
@@ -553,8 +585,7 @@ for (const key of ['grass', 'dirt', 'water']) {
 }
 
 function tileTypeAt(col, row) {
-  // Water fills the north-west corner (a lake), dirt a diagonal path,
-  // everything else is grass
+  // Water fills the north-west corner, dirt a diagonal path, rest is grass
   const x = col * TILE_SPACING;
   const z = row * TILE_SPACING;
   if (x < 300 && z < 240) return 'water';
@@ -562,34 +593,36 @@ function tileTypeAt(col, row) {
   return 'grass';
 }
 
+const tileMeshes = []; // all tile meshes for painter's algorithm
+
 function buildGround() {
   const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
 
-  // Group tiles by type into InstancedMeshes
-  const byType = { grass: [], dirt: [], water: [] };
-  for (let row = 0; row < GRID_ROWS; row++) {
+  // Create individual tile meshes sorted back-to-front (painter's algorithm).
+  // Camera is at (600, 800, 600) looking at (600, 0, 400), so tiles with
+  // higher Z (row) are further away → render first. Within same row, lower
+  // X (col) is further → render first.
+  for (let row = GRID_ROWS - 1; row >= 0; row--) {
     for (let col = 0; col < GRID_COLS; col++) {
-      byType[tileTypeAt(col, row)].push({
-        x: GRID_ORIGIN_X + col * TILE_SPACING + TILE_SIZE / 2,
-        z: GRID_ORIGIN_Z + row * TILE_SPACING + TILE_SIZE / 2
-      });
-    }
-  }
+      const type = tileTypeAt(col, row);
+      const x = GRID_ORIGIN_X + col * TILE_SPACING + TILE_SIZE / 2;
+      const z = GRID_ORIGIN_Z + row * TILE_SPACING + TILE_SIZE / 2;
 
-  const dummy = new THREE.Object3D();
-  for (const type of ['grass', 'dirt', 'water']) {
-    const tiles = byType[type];
-    if (tiles.length === 0) continue;
-    const inst = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ map: spriteTextures[type], transparent: true, depthWrite: false }), tiles.length);
-    inst.userData.isGround = true;
-    tiles.forEach((t, i) => {
-      dummy.position.set(t.x, -0.5, t.z);
-      dummy.rotation.set(-Math.PI / 2, 0, 0);
-      dummy.updateMatrix();
-      inst.setMatrixAt(i, dummy.matrix);
-    });
-    inst.instanceMatrix.needsUpdate = true;
-    scene.add(inst);
+      const mat = new THREE.MeshBasicMaterial({
+        map: spriteTextures[type],
+        alphaMap: diamondAlphaMap,     // diamond mask → transparent corners
+        transparent: true,
+        depthWrite: false,
+        alphaTest: 0.1,                // skip near-zero alpha fragments
+      });
+
+      const mesh = new THREE.Mesh(geo.clone(), mat);
+      mesh.position.set(x, -0.5, z);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.renderOrder = row * GRID_COLS + col; // painter's algorithm
+      scene.add(mesh);
+      tileMeshes.push(mesh);
+    }
   }
 }
 buildGround();
