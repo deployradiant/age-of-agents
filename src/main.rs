@@ -1,245 +1,264 @@
-/// Age of Agents — Axum WebSocket game server with SQLite persistence.
-///
-/// Run locally: cargo run
-/// Deploy:      modal deploy modal_app.py
-
-mod db;
-mod game_loop;
-mod state;
+mod game;
+mod store;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::Duration;
 
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::State,
-    http::Method,
-    response::Html,
-    routing::{get, post},
-    Router,
-};
-use futures_util::{SinkExt, StreamExt};
-use rusqlite::Connection;
+use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::response::{Html, IntoResponse};
+use axum::routing::get;
+use axum::{Json, Router};
+use game::{Command, GameWorld};
+use serde::{Deserialize, Serialize};
+use store::Store;
 use tokio::sync::{Mutex, broadcast};
-use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tracing_subscriber::EnvFilter;
 
-use state::*;
-use game_loop::*;
-use db::{open_db, load_world, should_save, background_save, save_world};
+const TICK_DURATION: Duration = Duration::from_millis(100);
+const SAVE_EVERY_TICKS: u64 = 10;
 
-/// Application shared state.
-struct AppState {
-    world: WorldRef,
-    broadcaster: broadcast::Sender<String>,
-    db: Arc<Mutex<Option<Connection>>>,
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum ClientMessage {
+    Command {
+        request_id: String,
+        command: Command,
+    },
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ServerMessage {
+    Snapshot {
+        world: GameWorld,
+    },
+    CommandResult {
+        request_id: String,
+        ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+}
+
+impl ServerMessage {
+    fn snapshot(world: &GameWorld) -> Self {
+        Self::Snapshot {
+            world: world.clone(),
+        }
+    }
+}
+
+struct AppState {
+    world: Mutex<GameWorld>,
+    snapshots: broadcast::Sender<ServerMessage>,
+    store: Store,
+}
+
+type SharedState = Arc<AppState>;
+
 #[tokio::main]
-async fn main() {
-    // Initialize logging
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
-    // Open SQLite database
-    let db_path = std::env::var("AGE_OF_AGENTS_DB").unwrap_or_else(|_| "age_of_agents.db".to_string());
-    let db_conn = db::open_db(Some(&db_path)).expect("Failed to open database");
-    let db = Arc::new(Mutex::new(Some(db_conn)));
+    let store = Store::configured();
+    store.initialize()?;
+    let world = store.load()?.unwrap_or_default();
+    tracing::info!(database = %store.path().display(), "world store ready");
 
-    // Load world from DB or create fresh
-    let world = {
-        let conn_guard = db.lock().await;
-        let conn = conn_guard.as_ref().unwrap();
-        match db::load_world(conn) {
-            Ok(Some(w)) => {
-                tracing::info!("📦 Loaded world from DB (tick {})", w.tick_count);
-                Arc::new(Mutex::new(w))
-            }
-            _ => {
-                tracing::info!("🌱 Creating new world");
-                Arc::new(Mutex::new(create_default_world()))
-            }
-        }
-    };
-
-    let (broadcaster, _) = broadcast::channel::<String>(32);
-
+    let (snapshots, _) = broadcast::channel(32);
     let state = Arc::new(AppState {
-        world: world.clone(),
-        broadcaster: broadcaster.clone(),
-        db: db.clone(),
+        world: Mutex::new(world),
+        snapshots,
+        store,
     });
-
-    // Spawn the game loop
-    let loop_world = world.clone();
-    let loop_broadcaster = broadcaster.clone();
-    let loop_db = db.clone();
-    tokio::spawn(async move {
-        game_loop_task(loop_world, loop_broadcaster, loop_db).await;
-    });
-
-    // Build router
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST]);
+    tokio::spawn(game_loop(state.clone()));
 
     let app = Router::new()
-        .route("/", get(index_handler))
-        .route("/reset", post(reset_handler))
-        .route("/state", get(state_handler))
-        .route("/save", post(save_handler))
-                .route("/ws", get(ws_handler))
-                .nest_service("/assets", ServeDir::new("assets"))
-                .layer(cors)
+        .route("/", get(index))
+        .route("/state", get(get_state))
+        .route("/ws", get(websocket))
+        .nest_service("/assets", ServeDir::new("assets"))
+        .nest_service("/frontend", ServeDir::new("frontend"))
         .with_state(state);
 
-    let addr = "0.0.0.0:8000";
-    tracing::info!("🚀 Age of Agents starting on http://{addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let address = "0.0.0.0:8000";
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    tracing::info!(%address, "server listening");
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
-// ── Game loop task ──────────────────────────────────────────────────────
-
-async fn game_loop_task(
-    world: WorldRef,
-    broadcaster: broadcast::Sender<String>,
-    db: Arc<Mutex<Option<Connection>>>,
-) {
-    let tick_interval = std::time::Duration::from_secs_f64(1.0 / TICK_RATE);
-    let mut tick_start = Instant::now();
-    let mut last_save_tick: u64 = 0;
-
+async fn game_loop(state: SharedState) {
+    let mut interval = tokio::time::interval(TICK_DURATION);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        let dt = tick_interval.as_secs_f64();
-
-        let state_msg = {
-            let mut w = world.lock().await;
-            let events = tick_world(&mut w, dt);
-            let msg = w.serialize_state(events);
-
-            // Auto-save to DB periodically
-            if db::should_save(w.tick_count) && w.tick_count != last_save_tick {
-                last_save_tick = w.tick_count;
-                if let Ok(json) = serde_json::to_string(&*w) {
-                    db::background_save("age_of_agents.db".to_string(), json);
-                    tracing::info!("💾 Auto-saved world at tick {}", w.tick_count);
-                }
+        interval.tick().await;
+        let message = {
+            let mut world = state.world.lock().await;
+            let buildings = world.buildings.len();
+            let active_units = world
+                .units
+                .iter()
+                .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
+                .count();
+            world.tick(TICK_DURATION.as_secs_f64());
+            let completed_action = world.buildings.len() != buildings
+                || world
+                    .units
+                    .iter()
+                    .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
+                    .count()
+                    < active_units;
+            if (world.tick % SAVE_EVERY_TICKS == 0 || completed_action)
+                && let Err(error) = state.store.save(&world)
+            {
+                tracing::error!(%error, "world save failed");
             }
-
-            serde_json::to_string(&msg).unwrap_or_default()
+            ServerMessage::snapshot(&world)
         };
-
-        let _ = broadcaster.send(state_msg);
-
-        let elapsed = tick_start.elapsed();
-        if elapsed < tick_interval {
-            tokio::time::sleep(tick_interval - elapsed).await;
-        }
-        tick_start = Instant::now();
+        let _ = state.snapshots.send(message);
     }
 }
 
-// ── Handlers ────────────────────────────────────────────────────────────
-
-async fn index_handler(State(_state): State<Arc<AppState>>) -> Html<String> {
-    let paths = [
-        "frontend/index.html",
-        "../frontend/index.html",
-        "/root/frontend/index.html",
-        "/app/frontend/index.html",
-    ];
-    for path in &paths {
-        if let Ok(content) = tokio::fs::read_to_string(path).await {
-            return Html(content);
-        }
-    }
-    Html(r#"<html><body><h1>Age of Agents</h1><p>Frontend not found.</p></body></html>"#.to_string())
-}
-
-async fn reset_handler(State(state): State<Arc<AppState>>) -> &'static str {
-    let mut w = state.world.lock().await;
-    *w = create_default_world();
-    "{\"status\":\"ok\"}"
-}
-
-async fn save_handler(State(state): State<Arc<AppState>>) -> String {
-    let w = state.world.lock().await;
-    let db_guard = state.db.lock().await;
-    if let Some(ref conn) = *db_guard {
-        match db::save_world(conn, &w) {
-            Ok(()) => format!(r#"{{"status":"ok","tick":{}}}"#, w.tick_count),
-            Err(e) => format!(r#"{{"status":"error","message":"{e}"}}"#),
-        }
-    } else {
-        r#"{"status":"error","message":"database not available"}"#.to_string()
+async fn index() -> Html<String> {
+    match tokio::fs::read_to_string("frontend/index.html").await {
+        Ok(content) => Html(content),
+        Err(_) => Html("<h1>Age of Agents</h1><p>Frontend not found.</p>".into()),
     }
 }
 
-async fn state_handler(State(state): State<Arc<AppState>>) -> String {
-    let w = state.world.lock().await;
-    let msg = w.serialize_state(Vec::new());
-    serde_json::to_string(&msg).unwrap_or_default()
+async fn get_state(State(state): State<SharedState>) -> Json<GameWorld> {
+    Json(state.world.lock().await.clone())
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState>>,
-) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws(socket, state))
+async fn websocket(ws: WebSocketUpgrade, State(state): State<SharedState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-// ── WebSocket handler ───────────────────────────────────────────────────
-
-async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
-    let (mut sender, mut receiver) = socket.split();
-    let mut rx = state.broadcaster.subscribe();
-
-    // Send initial state
-    {
-        let w = state.world.lock().await;
-        let msg = w.serialize_state(Vec::new());
-        if let Ok(json) = serde_json::to_string(&msg) {
-            let _ = sender.send(Message::Text(json.into())).await;
-        }
+async fn handle_socket(mut socket: WebSocket, state: SharedState) {
+    let initial = {
+        let world = state.world.lock().await;
+        ServerMessage::snapshot(&world)
+    };
+    if send_message(&mut socket, &initial).await.is_err() {
+        return;
     }
 
-    // Forward broadcast messages to this client
-    let send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if sender.send(Message::Text(msg.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    // Receive messages from client (player commands)
-    let recv_state = state.clone();
-    let recv_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
-            match msg {
-                Message::Text(text) => {
-                    // Parse player command
-                    if let Ok(cmd) = serde_json::from_str::<state::PlayerCommand>(&text) {
-                        if cmd.msg_type == "command" {
-                            let response = {
-                                let mut w = recv_state.world.lock().await;
-                                w.apply_command(&cmd)
-                            };
-                            tracing::info!("📜 Command: {} → {}", cmd.command, &response[..50.min(response.len())]);
+    let mut snapshots = state.snapshots.subscribe();
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                let Some(Ok(message)) = incoming else { break };
+                match message {
+                    Message::Text(text) => {
+                        let response = handle_client_message(&state, &text).await;
+                        if send_message(&mut socket, &response).await.is_err() {
+                            break;
                         }
                     }
+                    Message::Close(_) => break,
+                    _ => {}
                 }
-                Message::Close(_) => break,
-                _ => {}
+            }
+            snapshot = snapshots.recv() => {
+                match snapshot {
+                    Ok(message) => {
+                        if send_message(&mut socket, &message).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let current = {
+                            let world = state.world.lock().await;
+                            ServerMessage::snapshot(&world)
+                        };
+                        if send_message(&mut socket, &current).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
             }
         }
-    });
+    }
+}
 
-    tokio::select! {
-        _ = send_task => {},
-        _ = recv_task => {},
+async fn handle_client_message(state: &SharedState, text: &str) -> ServerMessage {
+    match serde_json::from_str::<ClientMessage>(text) {
+        Ok(ClientMessage::Command {
+            request_id,
+            command,
+        }) => {
+            let (result, snapshot) = {
+                let mut world = state.world.lock().await;
+                let mut candidate = world.clone();
+                let result = candidate
+                    .apply_command(command)
+                    .map_err(|error| error.to_string())
+                    .and_then(|()| {
+                        state.store.save(&candidate).map_err(|error| {
+                            tracing::error!(%error, "accepted command could not be saved");
+                            "command could not be saved".to_owned()
+                        })?;
+                        *world = candidate;
+                        Ok(())
+                    });
+                (result, ServerMessage::snapshot(&world))
+            };
+            if result.is_ok() {
+                let _ = state.snapshots.send(snapshot);
+            }
+            ServerMessage::CommandResult {
+                request_id,
+                ok: result.is_ok(),
+                error: result.err().map(|error| error.to_string()),
+            }
+        }
+        Err(error) => {
+            let request_id = serde_json::from_str::<serde_json::Value>(text)
+                .ok()
+                .and_then(|value| value.get("request_id")?.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            ServerMessage::CommandResult {
+                request_id,
+                ok: false,
+                error: Some(format!("invalid command: {error}")),
+            }
+        }
+    }
+}
+
+async fn send_message(socket: &mut WebSocket, message: &ServerMessage) -> Result<(), axum::Error> {
+    let json = serde_json::to_string(message).expect("server messages are serializable");
+    socket.send(Message::Text(json.into())).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_command_and_result_use_request_id() {
+        let message: ClientMessage = serde_json::from_str(
+            r#"{"type":"command","request_id":"request-7","command":{"type":"gather","unit_id":"villager-1","tree_id":"tree-1"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            ClientMessage::Command { request_id, .. } if request_id == "request-7"
+        ));
+
+        let result = ServerMessage::CommandResult {
+            request_id: "request-7".into(),
+            ok: true,
+            error: None,
+        };
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["type"], "command_result");
+        assert_eq!(json["request_id"], "request-7");
     }
 }

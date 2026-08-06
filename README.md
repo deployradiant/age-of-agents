@@ -1,95 +1,91 @@
-# Age of Agents 🏰
+# Age of Agents
 
-*A real-time strategy village simulation with LLM-driven NPC agents.*
+A deliberately small, mobile-first 2D isometric RTS vertical slice built with a Rust authoritative server, Canvas 2D frontend, WebSocket state streaming, and SQLite persistence.
 
-Age of Agents is an Age of Empires-inspired sandbox where every NPC is driven by an LLM (or a state machine). Watch autonomous agents gather resources, build structures, fight, and cooperate — all driven by thinking models deciding their next move in real time.
+The initial goal is intentionally narrow: select a villager, gather wood from a tree, and spend that wood to construct one building. There are no LLM agents or autonomous NPC policies in this milestone. Villagers remain idle until commanded.
+
+## Milestone 1
+
+- Clean isometric terrain rendering
+- Selectable villagers
+- Command-driven wood gathering
+- Command-driven construction of one building type
+- Shared wood stockpile
+- Rust-authoritative fixed-timestep simulation
+- Typed WebSocket commands and snapshots
+- SQLite save/load
+- Unified mobile and desktop controls
+- Modal deployment
+
+See [ROADMAP.md](ROADMAP.md) for the exact acceptance criteria and later milestones.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│                 Modal Server                     │
-│  ┌──────────┐  ┌────────────┐  ┌───────────┐   │
-│  │  Axum    │◄─┤ WebSocket  ├─►│ Game Loop │   │
-│  │ REST API │  │ Broadcast  │  │ (2 Hz)    │   │
-│  └──────────┘  └────────────┘  └─────┬─────┘   │
-│                                       │         │
-│  ┌────────────────────────────────────▼──────┐  │
-│  │            Agent State Machine             │  │
-│  │  IDLE → pick task → ACTIVE → execute →    │  │
-│  └────────────────────────────────────────────┘  │
-│                                       │         │
-│  ┌────────────────────────────────────▼──────┐  │
-│  │  (Future) Async LLM Agent Thinker         │  │
-│  │  Decoupled — agents think async,          │  │
-│  │  results feed back into game loop         │  │
-│  └────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
-         │ WebSocket (state updates)
-         ▼
-┌───────────────────┐
-│  HTML Frontend    │
-│  Three.js Canvas  │
-│  OrbitControls    │
-│  HUD Sidebar      │
-└───────────────────┘
+```text
+Canvas 2D client
+  ├─ pointer/touch input
+  ├─ isometric rendering
+  └─ WebSocket commands/snapshots
+              │
+              ▼
+Rust + Axum server
+  ├─ deterministic game domain
+  ├─ fixed timestep
+  ├─ command validation
+  └─ SQLite snapshot persistence
 ```
 
-## Quick Start
+The server owns the world. The browser renders snapshots and sends player intent; it does not simulate authoritative outcomes.
 
-### Local Dev
+## Run locally
+
+Requirements:
+
+- Rust 1.85 or newer
+- A modern browser
 
 ```bash
-# Prerequisites: Rust toolchain (rustup)
-
-# Run the server directly
-cargo run --release
-
-# Open http://localhost:8000
+cargo run
 ```
 
-### Docker
+Open <http://localhost:8000>.
+
+The default SQLite file is `age_of_agents.db`. Override it with:
 
 ```bash
-docker build -t age-of-agents .
-docker run -p 8000:8000 age-of-agents
+AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 ```
 
-### Modal Deploy
+## Controls
+
+- **Select:** tap/click a villager.
+- **Gather:** with a villager selected, tap/click a tree.
+- **Build:** select a villager, press the build button, then tap/click valid ground.
+- **Pan:** drag with one pointer.
+- **Zoom:** pinch or use the mouse wheel.
+- **Cancel build placement:** press the cancel button or Escape.
+
+Mouse and touch use the same command semantics.
+
+## Development checks
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets -- -D warnings
+node --check frontend/app.js
+```
+
+Before shipping structural changes, apply [docs/THERMONUCLEAR_REVIEW.md](docs/THERMONUCLEAR_REVIEW.md).
+
+## Deploy to Modal
 
 ```bash
 modal deploy modal_app.py
 ```
 
-The deployment uses a multi-stage Docker build (see `Dockerfile`):
-- **Stage 1** (`rust:latest`): Compiles the Cargo project in release mode
-- **Stage 2** (`debian:bookworm-slim`): Copies the binary and `frontend/` directory, exposes port 8000
+The production demo is deployed from `master` after local tests and browser verification pass.
 
-The Modal app (`modal_app.py`):
-- Builds the image via `modal.Image.from_dockerfile("Dockerfile")`
-- Mounts the local `frontend/` directory to `/root/frontend/` in the container (matching the path the Rust binary expects)
-- Exposes the Axum HTTP server on port 8000 using `@modal.web_server`
-- Allocates 256 MB memory with 1 warm container
+## Art direction
 
-## Current Status
-
-- ✅ Game world with agents, resources, buildings
-- ✅ State machine NPCs (gather, deposit, camp, wander, build)
-- ✅ Three.js 3D frontend with orbit controls
-- ✅ WebSocket real-time state broadcast
-- ✅ Rust/Axum backend with Docker + Modal deployment
-- ❌ Async LLM agent thinking — next milestone
-
-## Roadmap
-
-1. **Async LLM Agent Thinker** — Replace state machine decisions with async DeepSeek V4 Flash calls
-2. **Multi-model agents** — Assign different LLMs to different NPCs
-3. **Agent interaction** — Communication, trading, alliances between agents
-4. **Persistent world** — Save/load game state via Modal volumes
-5. **Web UI controls** — Click to select agents, issue commands
-
-## Built With
-
-- **Backend**: Rust + Axum + WebSockets on [Modal](https://modal.com)
-- **Frontend**: Three.js with OrbitControls
-- **LLMs (future)**: OpenRouter / DeepSeek V4 Flash
+The visual target is a warm hand-drawn cel-animation style with thin-to-medium dark contours, flat colors, and a fixed three-quarter isometric view. `assets/mood_board_v3.png` is the closest current directional reference. Existing sprites are placeholders and are being normalized to the asset contract in the roadmap.
