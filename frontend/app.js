@@ -42,6 +42,7 @@ const camera = { x: 0, y: 0, zoom: 0.8 };
 const pressedPanKeys = new Set();
 let previousFrameTime = null;
 let hoveredHit = null;
+let mousePosition = null;
 
 const assetPaths = {
   idle: '/assets/game/agent_idle.png',
@@ -120,7 +121,7 @@ function panCameraWithKeyboard(elapsedSeconds) {
   if (pressedPanKeys.has('KeyS') || pressedPanKeys.has('ArrowDown')) y += 1;
   if (x === 0 && y === 0) return;
   const length = Math.hypot(x, y);
-  const distance = 440 * Math.min(elapsedSeconds, 0.05) / camera.zoom;
+  const distance = 440 * Math.max(0, elapsedSeconds) / camera.zoom;
   camera.x += x / length * distance;
   camera.y += y / length * distance;
   clampCamera();
@@ -138,6 +139,7 @@ function resize() {
     canvas.height = height;
   }
   if (!cameraReady) centerCamera();
+  else clampCamera();
 }
 
 function diamondPath(x, y, size) {
@@ -328,6 +330,7 @@ function render(now) {
     return depth(a) - depth(b);
   });
   entities.forEach(item => drawEntity(item, now));
+  if (mousePosition) updateCursor(mousePosition.x, mousePosition.y);
 }
 
 function showToast(message) {
@@ -393,7 +396,10 @@ function hitAt(x, y) {
 }
 
 function updateCursor(x, y) {
-  if (Number.isFinite(x) && Number.isFinite(y)) hoveredHit = hitAt(x, y);
+  if (Number.isFinite(x) && Number.isFinite(y)) {
+    mousePosition = { x, y };
+    hoveredHit = hitAt(x, y);
+  }
   if (buildMode) canvas.style.cursor = 'crosshair';
   else if (laptopModeQuery.matches && (hoveredHit?.type === 'unit' || hoveredHit?.type === 'tree')) canvas.style.cursor = 'pointer';
   else canvas.style.cursor = laptopModeQuery.matches ? 'grab' : '';
@@ -482,6 +488,13 @@ function onPointerMove(event) {
   pointer.lastY = pointer.y;
 }
 
+function onPointerLeave(event) {
+  if (event.pointerType !== 'mouse') return;
+  mousePosition = null;
+  hoveredHit = null;
+  updateCursor();
+}
+
 function finishPointer(event, cancelled) {
   const pointer = pointers.get(event.pointerId);
   if (!pointer) return;
@@ -510,8 +523,15 @@ function shortcutTargetIsInteractive(target) {
   return target instanceof Element && Boolean(target.closest('input, textarea, select, button, summary, a[href], [contenteditable], [role="button"], [role="textbox"]'));
 }
 
+function clearPanInput() {
+  pressedPanKeys.clear();
+}
+
 function onKeyDown(event) {
-  if (!laptopModeQuery.matches || shortcutTargetIsInteractive(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!laptopModeQuery.matches || shortcutTargetIsInteractive(event.target) || event.ctrlKey || event.metaKey || event.altKey) {
+    clearPanInput();
+    return;
+  }
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(event.code)) {
     pressedPanKeys.add(event.code);
     event.preventDefault();
@@ -529,7 +549,7 @@ function onKeyUp(event) {
 }
 
 function updateLaptopMode() {
-  pressedPanKeys.clear();
+  clearPanInput();
   placementHint.textContent = laptopModeQuery.matches ? 'Click ground to build · Escape to cancel' : 'Tap ground to build · Escape to cancel';
   updateCursor();
 }
@@ -619,6 +639,7 @@ buildButton.addEventListener('click', () => setBuildMode(!buildMode));
 cancelButton.addEventListener('click', cancelBuild);
 canvas.addEventListener('pointerdown', onPointerDown);
 canvas.addEventListener('pointermove', onPointerMove);
+canvas.addEventListener('pointerleave', onPointerLeave);
 canvas.addEventListener('pointerup', event => finishPointer(event, false));
 canvas.addEventListener('pointercancel', event => finishPointer(event, true));
 canvas.addEventListener('contextmenu', event => event.preventDefault());
@@ -628,10 +649,14 @@ canvas.addEventListener('wheel', event => {
 }, { passive: false });
 window.addEventListener('keydown', onKeyDown);
 window.addEventListener('keyup', onKeyUp);
-window.addEventListener('blur', () => pressedPanKeys.clear());
+window.addEventListener('blur', clearPanInput);
+document.addEventListener('focusin', clearPanInput);
 laptopModeQuery.addEventListener('change', updateLaptopMode);
 window.addEventListener('online', connect);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && (!ws || ws.readyState > WebSocket.OPEN)) connect(); });
+document.addEventListener('visibilitychange', () => {
+  clearPanInput();
+  if (!document.hidden && (!ws || ws.readyState > WebSocket.OPEN)) connect();
+});
 new ResizeObserver(resize).observe(canvas);
 resize();
 updateLaptopMode();
