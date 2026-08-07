@@ -62,6 +62,18 @@
     .command:disabled { filter: grayscale(1); opacity: .45; cursor: default; }
     #cancel { display: none; }
     #cancel.visible { display: block; }
+    #laptop-help { display: none; }
+    @media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+      #laptop-help {
+        position: fixed; z-index: 4; top: 42px; right: 14px; display: block;
+        width: 210px; border: 1px solid #75613a; border-radius: 7px;
+        background: #171b12e8; color: #cfc6aa; box-shadow: 0 4px 14px #0008;
+        font-size: 11px; line-height: 1.45;
+      }
+      #laptop-help summary { padding: 6px 9px; color: #f0d58b; cursor: pointer; }
+      #laptop-help p { margin: 0; padding: 0 9px 8px; }
+      #placement { top: 43px; }
+    }
     @media (min-width: 700px) {
       #resources { padding-left: 18px; padding-right: 18px; }
       #selection { left: 18px; bottom: calc(84px + env(safe-area-inset-bottom)); }
@@ -75,6 +87,7 @@
   <aside id="selection" class="empty">Tap a villager to select</aside>
   <div id="placement">Tap ground to build · Escape to cancel</div>
   <div id="toast" role="status" aria-live="polite"></div>
+  <details id="laptop-help"><summary>Keyboard &amp; mouse</summary><p>WASD or arrows pan · Wheel zooms · B builds · Escape cancels</p></details>
   <nav id="dock" aria-label="Unit commands">
     <button id="build" class="command" disabled aria-label="Build town center" title="Build town center"><img src="/assets/game/command_build.png" alt=""><span>Build</span></button>
     <button id="cancel" class="command" aria-label="Cancel placement" title="Cancel placement"><img src="/assets/game/command_cancel.png" alt=""><span>Cancel</span></button>
