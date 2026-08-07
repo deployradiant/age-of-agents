@@ -20,8 +20,15 @@
       font-size: 13px; line-height: 20px; box-shadow: 0 2px 10px #0008;
     }
     #wood strong { color: #f0ce7a; font-variant-numeric: tabular-nums; }
+    #top-actions { display: flex; align-items: center; gap: 10px; }
     #connection { color: #d9aa70; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
     #connection.online { color: #9fd37b; }
+    #reset-world {
+      min-height: 30px; padding: 4px 9px; border: 1px solid #75613a; border-radius: 5px;
+      background: #282417; color: #d8c99e; font-size: 11px; cursor: pointer; touch-action: manipulation;
+    }
+    #reset-world:hover { border-color: #b39a5c; color: #f4dfaa; }
+    #reset-world:disabled { opacity: .5; cursor: default; }
     #selection {
       position: fixed; z-index: 3; left: 10px; bottom: calc(76px + env(safe-area-inset-bottom));
       max-width: min(300px, calc(100vw - 20px)); min-height: 42px; padding: 7px 11px;
@@ -83,7 +90,7 @@
 </head>
 <body>
   <main id="game" aria-label="Isometric game world"><canvas id="world"></canvas></main>
-  <header id="resources"><span id="wood">Wood <strong>0</strong></span><span id="connection">Connecting</span></header>
+  <header id="resources"><span id="wood">Wood <strong>0</strong></span><span id="top-actions"><button id="reset-world" type="button">Reset world</button><span id="connection">Connecting</span></span></header>
   <aside id="selection" class="empty">Tap a villager to select</aside>
   <div id="placement">Tap ground to build · Escape to cancel</div>
   <div id="toast" role="status" aria-live="polite"></div>

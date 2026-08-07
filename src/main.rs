@@ -7,8 +7,9 @@ use std::time::Duration;
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use game::{Command, GameWorld, WorldSnapshot};
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = Router::new()
         .route("/", get(index))
         .route("/state", get(get_state))
+        .route("/reset", post(reset_world))
         .route("/ws", get(websocket))
         .nest_service("/assets", ServeDir::new("assets"))
         .nest_service("/frontend", ServeDir::new("frontend"))
@@ -152,6 +154,23 @@ async fn index() -> Html<String> {
 
 async fn get_state(State(state): State<SharedState>) -> Json<WorldSnapshot> {
     Json(state.world.lock().await.snapshot())
+}
+
+async fn reset_world(
+    State(state): State<SharedState>,
+) -> Result<Json<WorldSnapshot>, (StatusCode, String)> {
+    let mut world = state.world.lock().await;
+    let fresh = GameWorld::default();
+    state.store.save(&fresh).map_err(|error| {
+        tracing::error!(%error, "world reset could not be saved");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "world reset could not be saved".to_owned(),
+        )
+    })?;
+    *world = fresh;
+    state.publish_snapshot(&world);
+    Ok(Json(world.snapshot()))
 }
 
 async fn websocket(ws: WebSocketUpgrade, State(state): State<SharedState>) -> impl IntoResponse {
@@ -265,7 +284,40 @@ async fn send_message(socket: &mut WebSocket, message: &ServerMessage) -> Result
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
+
+    #[tokio::test]
+    async fn reset_replaces_and_persists_the_default_world() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "age-of-agents-reset-{}-{nonce}.db",
+            std::process::id()
+        ));
+        let store = Store::from_path(&path);
+        store.initialize().unwrap();
+        let mut modified = GameWorld::default();
+        modified.stockpile.wood = 99.0;
+        store.save(&modified).unwrap();
+        let (snapshots, _) = broadcast::channel(4);
+        let state = Arc::new(AppState {
+            world: Mutex::new(modified),
+            snapshots,
+            next_snapshot_sequence: AtomicU64::new(0),
+            store: store.clone(),
+        });
+
+        let Json(snapshot) = reset_world(State(state)).await.unwrap();
+
+        assert_eq!(snapshot.tick, 0);
+        assert_eq!(snapshot.stockpile.wood, 0.0);
+        assert_eq!(store.load().unwrap(), Some(GameWorld::default()));
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn typed_command_and_result_use_request_id() {

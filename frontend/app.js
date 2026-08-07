@@ -7,6 +7,7 @@ const connection = document.getElementById('connection');
 const selection = document.getElementById('selection');
 const buildButton = document.getElementById('build');
 const cancelButton = document.getElementById('cancel');
+const resetWorldButton = document.getElementById('reset-world');
 const placementHint = document.getElementById('placement');
 const toast = document.getElementById('toast');
 const laptopModeQuery = window.matchMedia('(min-width: 900px) and (hover: hover) and (pointer: fine)');
@@ -663,8 +664,25 @@ function connect() {
   };
 }
 
+async function resetWorld() {
+  if (!window.confirm('Reset the entire world? All progress will be lost.')) return;
+  resetWorldButton.disabled = true;
+  try {
+    const response = await fetch('/reset', { method: 'POST' });
+    if (!response.ok) throw new Error(await response.text() || `Reset failed (${response.status})`);
+    selectedUnitId = null;
+    cancelBuild();
+    showToast('World reset');
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : 'World reset failed');
+  } finally {
+    resetWorldButton.disabled = false;
+  }
+}
+
 buildButton.addEventListener('click', () => setBuildMode(!buildMode));
 cancelButton.addEventListener('click', cancelBuild);
+resetWorldButton.addEventListener('click', resetWorld);
 canvas.addEventListener('pointerdown', onPointerDown);
 canvas.addEventListener('pointermove', onPointerMove);
 canvas.addEventListener('pointerleave', onPointerLeave);

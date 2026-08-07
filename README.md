@@ -65,6 +65,7 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 - **Pan:** drag with one pointer.
 - **Zoom:** pinch or use the mouse wheel.
 - **Recover view:** reload to center the camera on the currently visible villagers.
+- **Reset world:** press **Reset world** and confirm to erase progress and restore the deterministic starting state.
 - **Cancel build placement:** press the cancel button or Escape.
 
 Mouse and touch use the same command semantics.
