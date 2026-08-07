@@ -60,7 +60,7 @@
     .command span { position: absolute; left: 2px; right: 2px; bottom: 2px; padding: 2px; background: #111c; font-size: 9px; line-height: 11px; }
     .command:active, .command.active { transform: translateY(1px); border-color: #f1c557; box-shadow: 0 0 0 2px #e5b94455; }
     .command:disabled { filter: grayscale(1); opacity: .45; cursor: default; }
-    #cancel { display: none; width: auto; min-width: 58px; padding: 0 9px; }
+    #cancel { display: none; }
     #cancel.visible { display: block; }
     @media (min-width: 700px) {
       #resources { padding-left: 18px; padding-right: 18px; }
@@ -77,7 +77,7 @@
   <div id="toast" role="status" aria-live="polite"></div>
   <nav id="dock" aria-label="Unit commands">
     <button id="build" class="command" disabled aria-label="Build town center" title="Build town center"><img src="/assets/game/command_build.png" alt=""><span>Build</span></button>
-    <button id="cancel" class="command" aria-label="Cancel placement">Cancel</button>
+    <button id="cancel" class="command" aria-label="Cancel placement" title="Cancel placement"><img src="/assets/game/command_cancel.png" alt=""><span>Cancel</span></button>
   </nav>
   <script src="/frontend/app.js"></script>
 </body>

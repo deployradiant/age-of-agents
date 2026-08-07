@@ -17,6 +17,8 @@ const DRAG_THRESHOLD = 8;
 const sprites = {};
 const hits = [];
 const pointers = new Map();
+let groundLayer = null;
+let groundLayerKey = '';
 let cssWidth = 1;
 let cssHeight = 1;
 let dpr = 1;
@@ -43,14 +45,21 @@ const assetPaths = {
   walk2: '/assets/game/agent_walk_02.png',
   gather: '/assets/game/agent_gather.png',
   tree: '/assets/game/resource_tree.png',
-  building: '/assets/game/building_town_center.png'
+  building: '/assets/game/building_town_center.png',
+  dirt: '/assets/game/tile_dirt.png',
+  grass1: '/assets/game/tile_grass_01.png',
+  grass2: '/assets/game/tile_grass_02.png',
+  grass3: '/assets/game/tile_grass_03.png'
 };
 
 function loadSprite(name, url) {
   const asset = { image: null };
   sprites[name] = asset;
   const image = new Image();
-  image.onload = () => { asset.image = image; };
+  image.onload = () => {
+    asset.image = image;
+    if (name === 'dirt' || name.startsWith('grass')) groundLayer = null;
+  };
   image.onerror = () => { console.warn('Sprite failed to load', url); };
   image.src = url;
 }
@@ -117,9 +126,53 @@ function diamondPath(x, y, size) {
   ctx.closePath();
 }
 
+function buildGroundLayer(columns, rows) {
+  const terrain = [sprites.dirt, sprites.grass1, sprites.grass2, sprites.grass3];
+  if (terrain.some(asset => !asset?.image)) return null;
+  const key = `${columns}x${rows}`;
+  if (groundLayer && groundLayerKey === key) return groundLayer;
+  const sourceSize = 96;
+  const layer = document.createElement('canvas');
+  layer.width = columns * sourceSize;
+  layer.height = rows * sourceSize;
+  const layerContext = layer.getContext('2d', { alpha: false });
+  const grasses = terrain.slice(1);
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const hash = ((column * 73856093) ^ (row * 19349663)) >>> 0;
+      const image = (hash % 11 === 0 ? terrain[0] : grasses[hash % grasses.length]).image;
+      layerContext.drawImage(image, column * sourceSize, row * sourceSize);
+    }
+  }
+  groundLayer = layer;
+  groundLayerKey = key;
+  return layer;
+}
+
 function drawGround() {
   const columns = Math.ceil(world.width / TILE);
   const rows = Math.ceil(world.height / TILE);
+  const layer = buildGroundLayer(columns, rows);
+  if (layer) {
+    // Compose square tiles edge-to-edge first, then project the complete layer
+    // once. This keeps the isometric diamonds interlocked without per-tile
+    // antialiasing seams or overlap-based edge bleed.
+    const a = project(0, 0);
+    const b = project(columns * TILE, 0);
+    const d = project(0, rows * TILE);
+    ctx.save();
+    ctx.transform(
+      (b.x - a.x) / layer.width,
+      (b.y - a.y) / layer.width,
+      (d.x - a.x) / layer.height,
+      (d.y - a.y) / layer.height,
+      a.x,
+      a.y
+    );
+    ctx.drawImage(layer, 0, 0);
+    ctx.restore();
+    return;
+  }
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const x = column * TILE;
@@ -127,9 +180,6 @@ function drawGround() {
       diamondPath(x, y, TILE);
       ctx.fillStyle = (column + row) % 2 ? '#496d35' : '#52783a';
       ctx.fill();
-      ctx.strokeStyle = '#304c2b88';
-      ctx.lineWidth = Math.max(0.5, camera.zoom);
-      ctx.stroke();
     }
   }
 }
