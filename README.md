@@ -6,7 +6,8 @@ The initial goal is intentionally narrow: select a villager, gather wood from a 
 
 ## Milestone 1
 
-- Clean isometric terrain rendering
+- Persistent deterministic 2400×1600 Voronoi-style world with eight connected biomes
+- Server-authoritative fog with visible, explored-dim, and unseen-dark terrain
 - Selectable villagers
 - Command-driven wood gathering
 - Command-driven construction of one building type
@@ -63,6 +64,7 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 - **Build:** select a villager, press the build button, then tap/click valid ground.
 - **Pan:** drag with one pointer.
 - **Zoom:** pinch or use the mouse wheel.
+- **Recover view:** reload to center the camera on the currently visible villagers.
 - **Cancel build placement:** press the cancel button or Escape.
 
 Mouse and touch use the same command semantics.
@@ -89,3 +91,5 @@ The production demo is deployed from `master` after local tests and browser veri
 ## Art direction
 
 The visual target is a warm hand-drawn cel-animation style with thin-to-medium dark contours, flat colors, and a fixed three-quarter isometric view. `assets/mood_board_v3.png` is the closest current directional reference. Existing sprites are placeholders and are being normalized to the asset contract in the roadmap.
+
+The eight production terrain textures are generated through FAL and normalized to seamless 96×96 8-bit sRGB RGBA PNGs by `scripts/generate_terrain_textures.py`. Download provenance is recorded in `assets/generated/terrain_voronoi_sources.md`.

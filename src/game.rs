@@ -1,7 +1,14 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
-pub const WORLD_WIDTH: f64 = 1200.0;
-pub const WORLD_HEIGHT: f64 = 800.0;
+pub const WORLD_WIDTH: f64 = 2400.0;
+pub const WORLD_HEIGHT: f64 = 1600.0;
+pub const CELL_SIZE: f64 = 80.0;
+pub const WORLD_COLUMNS: u16 = 30;
+pub const WORLD_ROWS: u16 = 20;
+pub const UNIT_SIGHT_RADIUS: f64 = 320.0;
+pub const BUILDING_SIGHT_RADIUS: f64 = 480.0;
 pub const TOWN_CENTER_WOOD_COST: f64 = 20.0;
 pub const BUILD_SECONDS: f64 = 4.0;
 const MOVE_SPEED: f64 = 120.0;
@@ -17,6 +24,57 @@ impl Position {
     fn distance(self, other: Self) -> f64 {
         (self.x - other.x).hypot(self.y - other.y)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerrainBiome {
+    Meadow,
+    Forest,
+    Prairie,
+    Highland,
+    Wetland,
+    Scrubland,
+    Heath,
+    Clayland,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct CellCoordinate {
+    pub column: u16,
+    pub row: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerrainCell {
+    pub column: u16,
+    pub row: u16,
+    pub biome: TerrainBiome,
+}
+
+impl TerrainCell {
+    fn coordinate(self) -> CellCoordinate {
+        CellCoordinate {
+            column: self.column,
+            row: self.row,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellVisibility {
+    Unseen,
+    Explored,
+    Visible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotTerrainCell {
+    pub column: u16,
+    pub row: u16,
+    pub biome: TerrainBiome,
+    pub visibility: CellVisibility,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -63,12 +121,28 @@ pub struct Stockpile {
 pub struct GameWorld {
     pub width: f64,
     pub height: f64,
+    pub cell_size: f64,
     pub tick: u64,
+    pub terrain: Vec<TerrainCell>,
+    pub explored_cells: Vec<CellCoordinate>,
     pub units: Vec<Unit>,
     pub trees: Vec<Tree>,
     pub buildings: Vec<Building>,
     pub stockpile: Stockpile,
     next_building_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldSnapshot {
+    pub width: f64,
+    pub height: f64,
+    pub cell_size: f64,
+    pub tick: u64,
+    pub terrain: Vec<SnapshotTerrainCell>,
+    pub units: Vec<Unit>,
+    pub trees: Vec<Tree>,
+    pub buildings: Vec<Building>,
+    pub stockpile: Stockpile,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -104,32 +178,43 @@ impl std::fmt::Display for CommandError {
 
 impl Default for GameWorld {
     fn default() -> Self {
-        Self {
+        let mut world = Self {
             width: WORLD_WIDTH,
             height: WORLD_HEIGHT,
+            cell_size: CELL_SIZE,
             tick: 0,
+            terrain: generate_terrain(),
+            explored_cells: Vec::new(),
             units: vec![
                 Unit {
                     id: "villager-1".into(),
-                    position: Position { x: 300.0, y: 400.0 },
+                    position: Position {
+                        x: 1120.0,
+                        y: 800.0,
+                    },
                     action: UnitAction::Idle,
                 },
                 Unit {
                     id: "villager-2".into(),
-                    position: Position { x: 400.0, y: 400.0 },
+                    position: Position {
+                        x: 1200.0,
+                        y: 800.0,
+                    },
                     action: UnitAction::Idle,
                 },
             ],
             trees: vec![
-                tree("tree-1", 700.0, 200.0),
-                tree("tree-2", 850.0, 300.0),
-                tree("tree-3", 750.0, 550.0),
-                tree("tree-4", 950.0, 600.0),
+                tree("tree-1", 1360.0, 640.0),
+                tree("tree-2", 1520.0, 800.0),
+                tree("tree-3", 1320.0, 1040.0),
+                tree("tree-4", 880.0, 1040.0),
             ],
             buildings: Vec::new(),
             stockpile: Stockpile { wood: 0.0 },
             next_building_id: 1,
-        }
+        };
+        world.refresh_exploration();
+        world
     }
 }
 
@@ -139,6 +224,39 @@ fn tree(id: &str, x: f64, y: f64) -> Tree {
         position: Position { x, y },
         wood: 25.0,
     }
+}
+
+fn generate_terrain() -> Vec<TerrainCell> {
+    const SITES: [(u16, u16, TerrainBiome); 8] = [
+        (3, 3, TerrainBiome::Meadow),
+        (11, 2, TerrainBiome::Forest),
+        (21, 3, TerrainBiome::Prairie),
+        (27, 7, TerrainBiome::Highland),
+        (4, 14, TerrainBiome::Wetland),
+        (12, 17, TerrainBiome::Scrubland),
+        (20, 13, TerrainBiome::Heath),
+        (27, 17, TerrainBiome::Clayland),
+    ];
+
+    let mut terrain = Vec::with_capacity(usize::from(WORLD_COLUMNS * WORLD_ROWS));
+    for row in 0..WORLD_ROWS {
+        for column in 0..WORLD_COLUMNS {
+            let (_, _, biome) = SITES
+                .iter()
+                .min_by_key(|(site_column, site_row, _)| {
+                    let dx = i32::from(column) - i32::from(*site_column);
+                    let dy = i32::from(row) - i32::from(*site_row);
+                    dx * dx + dy * dy
+                })
+                .expect("the fixed Voronoi map has sites");
+            terrain.push(TerrainCell {
+                column,
+                row,
+                biome: *biome,
+            });
+        }
+    }
+    terrain
 }
 
 impl GameWorld {
@@ -206,6 +324,109 @@ impl GameWorld {
                 }
             }
         }
+        self.refresh_exploration();
+    }
+
+    pub fn snapshot(&self) -> WorldSnapshot {
+        let visible = self.visible_cells();
+        let explored: BTreeSet<_> = self.explored_cells.iter().copied().collect();
+        let is_visible = |position: Position| {
+            self.cell_for_position(position)
+                .is_some_and(|cell| visible.contains(&cell))
+        };
+
+        WorldSnapshot {
+            width: self.width,
+            height: self.height,
+            cell_size: self.cell_size,
+            tick: self.tick,
+            terrain: self
+                .terrain
+                .iter()
+                .map(|cell| {
+                    let coordinate = cell.coordinate();
+                    let visibility = if visible.contains(&coordinate) {
+                        CellVisibility::Visible
+                    } else if explored.contains(&coordinate) {
+                        CellVisibility::Explored
+                    } else {
+                        CellVisibility::Unseen
+                    };
+                    SnapshotTerrainCell {
+                        column: cell.column,
+                        row: cell.row,
+                        biome: cell.biome,
+                        visibility,
+                    }
+                })
+                .collect(),
+            units: self
+                .units
+                .iter()
+                .filter(|unit| is_visible(unit.position))
+                .cloned()
+                .collect(),
+            trees: self
+                .trees
+                .iter()
+                .filter(|tree| is_visible(tree.position))
+                .cloned()
+                .collect(),
+            buildings: self
+                .buildings
+                .iter()
+                .filter(|building| is_visible(building.position))
+                .cloned()
+                .collect(),
+            stockpile: self.stockpile.clone(),
+        }
+    }
+
+    fn refresh_exploration(&mut self) {
+        let visible = self.visible_cells();
+        let mut explored: BTreeSet<_> = self
+            .explored_cells
+            .iter()
+            .copied()
+            .filter(|cell| cell.column < WORLD_COLUMNS && cell.row < WORLD_ROWS)
+            .collect();
+        explored.extend(visible);
+        self.explored_cells = explored.into_iter().collect();
+    }
+
+    fn visible_cells(&self) -> BTreeSet<CellCoordinate> {
+        let mut visible = BTreeSet::new();
+        for cell in &self.terrain {
+            let center = Position {
+                x: (f64::from(cell.column) + 0.5) * self.cell_size,
+                y: (f64::from(cell.row) + 0.5) * self.cell_size,
+            };
+            let seen_by_unit = self
+                .units
+                .iter()
+                .any(|unit| unit.position.distance(center) <= UNIT_SIGHT_RADIUS);
+            let seen_by_building = self
+                .buildings
+                .iter()
+                .any(|building| building.position.distance(center) <= BUILDING_SIGHT_RADIUS);
+            if seen_by_unit || seen_by_building {
+                visible.insert(cell.coordinate());
+            }
+        }
+        visible
+    }
+
+    fn cell_for_position(&self, position: Position) -> Option<CellCoordinate> {
+        if !position.x.is_finite()
+            || !position.y.is_finite()
+            || !(0.0..=self.width).contains(&position.x)
+            || !(0.0..=self.height).contains(&position.y)
+        {
+            return None;
+        }
+        let column = ((position.x / self.cell_size).floor() as u16).min(WORLD_COLUMNS - 1);
+        let row = ((position.y / self.cell_size).floor() as u16).min(WORLD_ROWS - 1);
+        Some(CellCoordinate { column, row })
     }
 
     fn tick_gather(&mut self, unit_index: usize, tree_id: String, dt: f64) {
@@ -274,7 +495,175 @@ fn move_toward(position: &mut Position, target: Position, dt: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
     use super::*;
+
+    #[test]
+    fn voronoi_terrain_is_fixed_and_deterministic() {
+        let first = GameWorld::default();
+        let second = GameWorld::default();
+        assert_eq!(first.width, 2400.0);
+        assert_eq!(first.height, 1600.0);
+        assert_eq!(first.cell_size, 80.0);
+        assert_eq!(first.terrain, second.terrain);
+    }
+
+    #[test]
+    fn voronoi_terrain_contains_exactly_all_eight_biomes() {
+        let biomes: BTreeSet<_> = GameWorld::default()
+            .terrain
+            .iter()
+            .map(|cell| cell.biome)
+            .collect();
+        assert_eq!(biomes.len(), 8);
+    }
+
+    #[test]
+    fn terrain_cells_are_unique_and_cover_the_world_bounds() {
+        let world = GameWorld::default();
+        let coordinates: BTreeSet<_> = world.terrain.iter().map(|cell| cell.coordinate()).collect();
+        assert_eq!(world.terrain.len(), 600);
+        assert_eq!(coordinates.len(), 600);
+        assert!(
+            coordinates
+                .iter()
+                .all(|cell| cell.column < WORLD_COLUMNS && cell.row < WORLD_ROWS)
+        );
+        assert!(coordinates.contains(&CellCoordinate { column: 0, row: 0 }));
+        assert!(coordinates.contains(&CellCoordinate {
+            column: WORLD_COLUMNS - 1,
+            row: WORLD_ROWS - 1,
+        }));
+    }
+
+    #[test]
+    fn every_voronoi_biome_is_one_coherent_region() {
+        let world = GameWorld::default();
+        let by_biome: BTreeMap<_, BTreeSet<_>> =
+            world
+                .terrain
+                .iter()
+                .fold(BTreeMap::new(), |mut regions, cell| {
+                    regions
+                        .entry(cell.biome)
+                        .or_default()
+                        .insert(cell.coordinate());
+                    regions
+                });
+
+        for (biome, region) in by_biome {
+            let mut reached = BTreeSet::new();
+            let mut queue = VecDeque::from([*region.first().expect("biome is present")]);
+            while let Some(cell) = queue.pop_front() {
+                if !reached.insert(cell) {
+                    continue;
+                }
+                for (dx, dy) in [(1_i32, 0_i32), (-1, 0), (0, 1), (0, -1)] {
+                    let column = i32::from(cell.column) + dx;
+                    let row = i32::from(cell.row) + dy;
+                    if column >= 0 && row >= 0 {
+                        let neighbor = CellCoordinate {
+                            column: column as u16,
+                            row: row as u16,
+                        };
+                        if region.contains(&neighbor) && !reached.contains(&neighbor) {
+                            queue.push_back(neighbor);
+                        }
+                    }
+                }
+            }
+            assert_eq!(reached, region, "{biome:?} is not coherent");
+        }
+    }
+
+    #[test]
+    fn explored_cells_only_grow_as_units_move() {
+        let mut world = GameWorld::default();
+        let initially_explored: BTreeSet<_> = world.explored_cells.iter().copied().collect();
+        world.units[0].position = Position { x: 80.0, y: 80.0 };
+        world.units[1].position = Position { x: 80.0, y: 80.0 };
+        world.tick(0.1);
+        let after_move: BTreeSet<_> = world.explored_cells.iter().copied().collect();
+        assert!(after_move.is_superset(&initially_explored));
+        assert!(after_move.len() > initially_explored.len());
+
+        world.units[0].position = Position {
+            x: 2320.0,
+            y: 1520.0,
+        };
+        world.units[1].position = Position {
+            x: 2320.0,
+            y: 1520.0,
+        };
+        world.tick(0.1);
+        let after_second_move: BTreeSet<_> = world.explored_cells.iter().copied().collect();
+        assert!(after_second_move.is_superset(&after_move));
+        assert!(after_second_move.len() > after_move.len());
+    }
+
+    #[test]
+    fn snapshots_have_three_typed_fog_states_and_hide_unseen_trees() {
+        let mut world = GameWorld::default();
+        world.units[0].position = Position { x: 80.0, y: 80.0 };
+        world.units[1].position = Position { x: 80.0, y: 80.0 };
+        world.tick(0.1);
+        let snapshot = world.snapshot();
+        let states: BTreeSet<_> = snapshot
+            .terrain
+            .iter()
+            .map(|cell| cell.visibility)
+            .collect();
+        assert_eq!(
+            states,
+            BTreeSet::from([
+                CellVisibility::Unseen,
+                CellVisibility::Explored,
+                CellVisibility::Visible,
+            ])
+        );
+        assert!(snapshot.trees.is_empty());
+        assert_eq!(snapshot.units.len(), 2);
+    }
+
+    #[test]
+    fn completed_buildings_reveal_with_the_larger_building_radius() {
+        let mut world = GameWorld::default();
+        world.units.clear();
+        world.buildings.push(Building {
+            id: "building-sight".into(),
+            kind: BuildingKind::TownCenter,
+            position: Position {
+                x: 1200.0,
+                y: 800.0,
+            },
+        });
+        world.explored_cells.clear();
+        world.refresh_exploration();
+        let building_visible = world
+            .snapshot()
+            .terrain
+            .into_iter()
+            .filter(|cell| cell.visibility == CellVisibility::Visible)
+            .count();
+
+        world.buildings.clear();
+        world.units.push(Unit {
+            id: "unit-sight".into(),
+            position: Position {
+                x: 1200.0,
+                y: 800.0,
+            },
+            action: UnitAction::Idle,
+        });
+        let unit_visible = world
+            .snapshot()
+            .terrain
+            .into_iter()
+            .filter(|cell| cell.visibility == CellVisibility::Visible)
+            .count();
+        assert!(building_visible > unit_visible);
+    }
 
     #[test]
     fn idle_world_is_invariant_except_tick() {

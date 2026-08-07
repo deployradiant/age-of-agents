@@ -8,7 +8,9 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 
 ### World
 
-- Deterministic 1200×800 map.
+- Deterministic maximum-size 2400×1600 map, generated once as 600 persisted cells.
+- Eight meaningful, individually connected Voronoi-style biome regions.
+- Persistent explored fog; unit/building sight produces visible, explored-dim, and unseen-dark terrain, and unseen entities are omitted from client snapshots.
 - Two villagers, initially idle.
 - Four wood-bearing trees.
 - One shared wood stockpile.
@@ -41,7 +43,7 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 ### Frontend
 
 - Native Canvas 2D; no Three.js or UI framework.
-- Fixed isometric tile map with no visible seams.
+- Fixed isometric Canvas tile map with no visible seams and exactly eight production terrain textures.
 - Entities draw in stable ground-depth order.
 - Tap/click selects a villager.
 - Tap/click a tree to gather.
@@ -72,7 +74,7 @@ Required set:
 | `agent_gather.png` | 256×256 | 40×40 | same baseline and identity |
 | `resource_tree.png` | 256×256 | 35×35 | trunk bottom-center |
 | `building_town_center.png` | 512×512 | 80×80 | footprint bottom-center |
-| terrain tile variants | 96×96 | renderer-defined | seamless square source |
+| eight biome terrain textures | 96×96 | renderer-defined | seamless square source |
 | build/cancel controls | 128×128 | 48×48 minimum | centered icon |
 
 Animation gates:
@@ -107,7 +109,7 @@ Only after Milestone 1 is stable:
 - Population and production.
 - One military unit and one enemy target.
 - Basic combat.
-- Fog of war.
+- Additional strategic fog rules (enemy vision and scouting); terrain exploration is delivered in Milestone 1.
 - Scenario win/lose condition.
 
 ## Explicitly deferred

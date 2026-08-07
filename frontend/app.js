@@ -35,7 +35,7 @@ let reconnectAttempt = 0;
 let requestSequence = 0;
 let lastSnapshotSequence = 0;
 let minimumSnapshotSequence = 0;
-let world = { width: 1200, height: 800, wood: 0, units: [], trees: [], buildings: [] };
+let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, terrain: [], units: [], trees: [], buildings: [] };
 let tick = 0;
 const camera = { x: 0, y: 0, zoom: 0.8 };
 
@@ -46,10 +46,19 @@ const assetPaths = {
   gather: '/assets/game/agent_gather.png',
   tree: '/assets/game/resource_tree.png',
   building: '/assets/game/building_town_center.png',
-  dirt: '/assets/game/tile_dirt.png',
-  grass1: '/assets/game/tile_grass_01.png',
-  grass2: '/assets/game/tile_grass_02.png',
-  grass3: '/assets/game/tile_grass_03.png'
+  meadow: '/assets/game/terrain_meadow.png',
+  forest: '/assets/game/terrain_forest.png',
+  prairie: '/assets/game/terrain_grassland.png',
+  highland: '/assets/game/terrain_highland.png',
+  wetland: '/assets/game/terrain_deep_forest.png',
+  scrubland: '/assets/game/terrain_scrub.png',
+  heath: '/assets/game/terrain_rock.png',
+  clayland: '/assets/game/terrain_dirt.png'
+};
+
+const biomeTextures = {
+  meadow: 'meadow', forest: 'forest', prairie: 'prairie', highland: 'highland',
+  wetland: 'wetland', scrubland: 'scrubland', heath: 'heath', clayland: 'clayland'
 };
 
 function loadSprite(name, url) {
@@ -58,7 +67,7 @@ function loadSprite(name, url) {
   const image = new Image();
   image.onload = () => {
     asset.image = image;
-    if (name === 'dirt' || name.startsWith('grass')) groundLayer = null;
+    if (Object.prototype.hasOwnProperty.call(biomeTextures, name)) groundLayer = null;
   };
   image.onerror = () => { console.warn('Sprite failed to load', url); };
   image.src = url;
@@ -91,12 +100,22 @@ function screenToWorld(x, y) {
 }
 
 function centerCamera() {
-  const center = rawProject(world.width / 2, world.height / 2);
+  const focus = world.units.length
+    ? world.units.reduce((sum, unit) => ({ x: sum.x + unit.x / world.units.length, y: sum.y + unit.y / world.units.length }), { x: 0, y: 0 })
+    : { x: world.width / 2, y: world.height / 2 };
+  const center = rawProject(focus.x, focus.y);
   camera.x = center.x;
   camera.y = center.y;
-  const fit = Math.min(cssWidth / Math.max(world.width, world.height), cssHeight / ((world.width + world.height) / 2));
-  camera.zoom = Math.max(MIN_ZOOM, Math.min(1.1, fit * 1.45));
+  camera.zoom = Math.max(MIN_ZOOM, Math.min(1, cssWidth < 700 ? 0.55 : 0.8));
   cameraReady = true;
+}
+
+function clampCamera() {
+  const corners = [rawProject(0, 0), rawProject(world.width, 0), rawProject(0, world.height), rawProject(world.width, world.height)];
+  const marginX = cssWidth * 0.35 / camera.zoom;
+  const marginY = cssHeight * 0.35 / camera.zoom;
+  camera.x = Math.max(Math.min(...corners.map(point => point.x)) - marginX, Math.min(Math.max(...corners.map(point => point.x)) + marginX, camera.x));
+  camera.y = Math.max(Math.min(...corners.map(point => point.y)) - marginY, Math.min(Math.max(...corners.map(point => point.y)) + marginY, camera.y));
 }
 
 function resize() {
@@ -127,21 +146,22 @@ function diamondPath(x, y, size) {
 }
 
 function buildGroundLayer(columns, rows) {
-  const terrain = [sprites.dirt, sprites.grass1, sprites.grass2, sprites.grass3];
-  if (terrain.some(asset => !asset?.image)) return null;
-  const key = `${columns}x${rows}`;
+  const textures = Object.values(biomeTextures).map(name => sprites[name]);
+  if (textures.some(asset => !asset?.image) || world.terrain.length !== columns * rows) return null;
+  const key = world.terrain.map(cell => `${cell.biome}:${cell.visibility}`).join('|');
   if (groundLayer && groundLayerKey === key) return groundLayer;
   const sourceSize = 96;
   const layer = document.createElement('canvas');
   layer.width = columns * sourceSize;
   layer.height = rows * sourceSize;
   const layerContext = layer.getContext('2d', { alpha: false });
-  const grasses = terrain.slice(1);
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const hash = ((column * 73856093) ^ (row * 19349663)) >>> 0;
-      const image = (hash % 11 === 0 ? terrain[0] : grasses[hash % grasses.length]).image;
-      layerContext.drawImage(image, column * sourceSize, row * sourceSize);
+  for (const cell of world.terrain) {
+    const left = cell.column * sourceSize;
+    const top = cell.row * sourceSize;
+    layerContext.drawImage(sprites[biomeTextures[cell.biome]].image, left, top, sourceSize, sourceSize);
+    if (cell.visibility !== 'visible') {
+      layerContext.fillStyle = cell.visibility === 'explored' ? '#08100ba8' : '#020504f2';
+      layerContext.fillRect(left, top, sourceSize, sourceSize);
     }
   }
   groundLayer = layer;
@@ -150,8 +170,8 @@ function buildGroundLayer(columns, rows) {
 }
 
 function drawGround() {
-  const columns = Math.ceil(world.width / TILE);
-  const rows = Math.ceil(world.height / TILE);
+  const columns = Math.ceil(world.width / world.cellSize);
+  const rows = Math.ceil(world.height / world.cellSize);
   const layer = buildGroundLayer(columns, rows);
   if (layer) {
     // Compose square tiles edge-to-edge first, then project the complete layer
@@ -175,10 +195,10 @@ function drawGround() {
   }
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
-      const x = column * TILE;
-      const y = row * TILE;
-      diamondPath(x, y, TILE);
-      ctx.fillStyle = (column + row) % 2 ? '#496d35' : '#52783a';
+      const x = column * world.cellSize;
+      const y = row * world.cellSize;
+      diamondPath(x, y, world.cellSize);
+      ctx.fillStyle = '#020504';
       ctx.fill();
     }
   }
@@ -424,6 +444,7 @@ function onPointerMove(event) {
     if (pointer.dragging) {
       camera.x -= (pointer.x - pointer.lastX) / camera.zoom;
       camera.y -= (pointer.y - pointer.lastY) / camera.zoom;
+      clampCamera();
       gestureUsed = true;
     }
   }
@@ -452,6 +473,7 @@ function zoomAt(x, y, factor) {
   camera.zoom = next;
   camera.x = anchor.x - (x - cssWidth / 2) / next;
   camera.y = anchor.y - (y - cssHeight * 0.42) / next;
+  clampCamera();
 }
 
 function connect() {
@@ -488,7 +510,7 @@ function connect() {
           let state = 'idle';
           if (action === 'gather') {
             const tree = next.trees?.find(item => item.id === unit.action.tree_id);
-            const distance = tree ? Math.hypot(unit.position.x - tree.position.x, unit.position.y - tree.position.y) : 0;
+            const distance = tree ? Math.hypot(unit.position.x - tree.position.x, unit.position.y - tree.position.y) : Infinity;
             state = distance > 0.5 ? 'moving' : 'gathering';
           } else if (action === 'build') {
             const distance = Math.hypot(unit.position.x - unit.action.x, unit.position.y - unit.action.y);
@@ -501,9 +523,11 @@ function connect() {
           };
         };
         world = {
-          width: Number(next.width) || 1200,
-          height: Number(next.height) || 800,
+          width: Number(next.width) || 2400,
+          height: Number(next.height) || 1600,
+          cellSize: Number(next.cell_size) || TILE,
           wood: Number(next.stockpile?.wood) || 0,
+          terrain: Array.isArray(next.terrain) ? next.terrain : [],
           units: Array.isArray(next.units) ? next.units.map(unitForDisplay) : [],
           trees: Array.isArray(next.trees) ? next.trees.map(withPosition) : [],
           buildings: Array.isArray(next.buildings) ? next.buildings.map(withPosition) : []
