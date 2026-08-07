@@ -10,7 +10,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
-use game::{Command, GameWorld};
+use game::{Command, GameWorld, WorldSnapshot};
 use serde::{Deserialize, Serialize};
 use store::Store;
 use tokio::sync::{Mutex, broadcast};
@@ -34,7 +34,7 @@ enum ClientMessage {
 enum ServerMessage {
     Snapshot {
         sequence: u64,
-        world: GameWorld,
+        world: WorldSnapshot,
     },
     CommandResult {
         request_id: String,
@@ -50,7 +50,7 @@ impl ServerMessage {
     fn snapshot(sequence: u64, world: &GameWorld) -> Self {
         Self::Snapshot {
             sequence,
-            world: world.clone(),
+            world: world.snapshot(),
         }
     }
 }
@@ -150,8 +150,8 @@ async fn index() -> Html<String> {
     }
 }
 
-async fn get_state(State(state): State<SharedState>) -> Json<GameWorld> {
-    Json(state.world.lock().await.clone())
+async fn get_state(State(state): State<SharedState>) -> Json<WorldSnapshot> {
+    Json(state.world.lock().await.snapshot())
 }
 
 async fn websocket(ws: WebSocketUpgrade, State(state): State<SharedState>) -> impl IntoResponse {
@@ -288,5 +288,25 @@ mod tests {
         assert_eq!(json["type"], "command_result");
         assert_eq!(json["request_id"], "request-7");
         assert_eq!(json["applied_sequence"], 9);
+    }
+
+    #[test]
+    fn snapshots_serialize_typed_visibility_without_unseen_entities() {
+        let message = ServerMessage::snapshot(4, &GameWorld::default());
+        let json = serde_json::to_value(message).unwrap();
+        assert_eq!(json["type"], "snapshot");
+        assert_eq!(json["sequence"], 4);
+        assert_eq!(json["world"]["width"], 2400.0);
+        assert!(
+            json["world"]["terrain"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|cell| matches!(
+                    cell["visibility"].as_str(),
+                    Some("unseen" | "explored" | "visible")
+                ))
+        );
+        assert!(json["world"]["trees"].as_array().unwrap().len() < 4);
     }
 }
