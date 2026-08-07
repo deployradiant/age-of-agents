@@ -31,13 +31,29 @@ impl Store {
     }
 
     pub fn initialize(&self) -> StoreResult<()> {
-        let connection = Connection::open(&self.path)?;
-        connection.execute_batch(
+        let mut connection = Connection::open(&self.path)?;
+        let legacy_schema = {
+            let mut statement = connection.prepare("PRAGMA table_info(world_state)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            columns
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .any(|column| column == "saved_at")
+        };
+        let transaction = connection.transaction()?;
+        if legacy_schema {
+            // The pre-milestone prototype stored a fundamentally different world
+            // model. Its snapshot cannot be translated into this smaller game.
+            transaction.execute_batch("DROP TABLE world_state;")?;
+        }
+        transaction.execute_batch(
             "CREATE TABLE IF NOT EXISTS world_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 world_json TEXT NOT NULL
-            );",
+            );
+            PRAGMA user_version = 1;",
         )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -141,6 +157,30 @@ mod tests {
         drop(connection);
 
         assert!(store.load().is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_schema_is_migrated_to_an_empty_current_store() {
+        let path = temporary_db("legacy");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE world_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    world_json TEXT NOT NULL,
+                    saved_at TEXT NOT NULL
+                );
+                INSERT INTO world_state VALUES (1, '{\"legacy\":true}', '2026-08-01');",
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = Store::from_path(&path);
+        store.initialize().unwrap();
+        assert_eq!(store.load().unwrap(), None);
+        store.save(&GameWorld::default()).unwrap();
+        assert!(store.load().unwrap().is_some());
         std::fs::remove_file(path).unwrap();
     }
 }

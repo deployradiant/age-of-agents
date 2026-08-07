@@ -2,6 +2,7 @@ mod game;
 mod store;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -32,6 +33,7 @@ enum ClientMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage {
     Snapshot {
+        sequence: u64,
         world: GameWorld,
     },
     CommandResult {
@@ -39,12 +41,15 @@ enum ServerMessage {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        applied_sequence: Option<u64>,
     },
 }
 
 impl ServerMessage {
-    fn snapshot(world: &GameWorld) -> Self {
+    fn snapshot(sequence: u64, world: &GameWorld) -> Self {
         Self::Snapshot {
+            sequence,
             world: world.clone(),
         }
     }
@@ -53,7 +58,21 @@ impl ServerMessage {
 struct AppState {
     world: Mutex<GameWorld>,
     snapshots: broadcast::Sender<ServerMessage>,
+    next_snapshot_sequence: AtomicU64,
     store: Store,
+}
+
+impl AppState {
+    fn snapshot(&self, world: &GameWorld) -> (u64, ServerMessage) {
+        let sequence = self.next_snapshot_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        (sequence, ServerMessage::snapshot(sequence, world))
+    }
+
+    fn publish_snapshot(&self, world: &GameWorld) -> u64 {
+        let (sequence, message) = self.snapshot(world);
+        let _ = self.snapshots.send(message);
+        sequence
+    }
 }
 
 type SharedState = Arc<AppState>;
@@ -73,6 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let state = Arc::new(AppState {
         world: Mutex::new(world),
         snapshots,
+        next_snapshot_sequence: AtomicU64::new(0),
         store,
     });
     tokio::spawn(game_loop(state.clone()));
@@ -97,30 +117,29 @@ async fn game_loop(state: SharedState) {
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         interval.tick().await;
-        let message = {
-            let mut world = state.world.lock().await;
-            let buildings = world.buildings.len();
-            let active_units = world
+        let mut world = state.world.lock().await;
+        let buildings = world.buildings.len();
+        let active_units = world
+            .units
+            .iter()
+            .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
+            .count();
+        world.tick(TICK_DURATION.as_secs_f64());
+        let completed_action = world.buildings.len() != buildings
+            || world
                 .units
                 .iter()
                 .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
-                .count();
-            world.tick(TICK_DURATION.as_secs_f64());
-            let completed_action = world.buildings.len() != buildings
-                || world
-                    .units
-                    .iter()
-                    .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
-                    .count()
-                    < active_units;
-            if (world.tick % SAVE_EVERY_TICKS == 0 || completed_action)
-                && let Err(error) = state.store.save(&world)
-            {
-                tracing::error!(%error, "world save failed");
-            }
-            ServerMessage::snapshot(&world)
-        };
-        let _ = state.snapshots.send(message);
+                .count()
+                < active_units;
+        if (world.tick % SAVE_EVERY_TICKS == 0 || completed_action)
+            && let Err(error) = state.store.save(&world)
+        {
+            tracing::error!(%error, "world save failed");
+        }
+        // Publish while holding the same lock that orders world mutations. This
+        // prevents a command snapshot from overtaking a tick snapshot.
+        state.publish_snapshot(&world);
     }
 }
 
@@ -142,7 +161,7 @@ async fn websocket(ws: WebSocketUpgrade, State(state): State<SharedState>) -> im
 async fn handle_socket(mut socket: WebSocket, state: SharedState) {
     let initial = {
         let world = state.world.lock().await;
-        ServerMessage::snapshot(&world)
+        state.snapshot(&world).1
     };
     if send_message(&mut socket, &initial).await.is_err() {
         return;
@@ -151,6 +170,32 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState) {
     let mut snapshots = state.snapshots.subscribe();
     loop {
         tokio::select! {
+            // Drain already-published world states before accepting another command,
+            // so a command result is never followed by an older queued snapshot.
+            biased;
+            snapshot = snapshots.recv() => {
+                match snapshot {
+                    Ok(message) => {
+                        if send_message(&mut socket, &message).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // Replace retained stale messages while holding the world lock.
+                        // Every publisher holds this lock too, so anything queued after
+                        // the resubscribe is newer than the synthesized current state.
+                        let current = {
+                            let world = state.world.lock().await;
+                            snapshots = state.snapshots.subscribe();
+                            state.snapshot(&world).1
+                        };
+                        if send_message(&mut socket, &current).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
             incoming = socket.recv() => {
                 let Some(Ok(message)) = incoming else { break };
                 match message {
@@ -164,25 +209,6 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState) {
                     _ => {}
                 }
             }
-            snapshot = snapshots.recv() => {
-                match snapshot {
-                    Ok(message) => {
-                        if send_message(&mut socket, &message).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let current = {
-                            let world = state.world.lock().await;
-                            ServerMessage::snapshot(&world)
-                        };
-                        if send_message(&mut socket, &current).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
         }
     }
 }
@@ -193,7 +219,7 @@ async fn handle_client_message(state: &SharedState, text: &str) -> ServerMessage
             request_id,
             command,
         }) => {
-            let (result, snapshot) = {
+            let (result, applied_sequence) = {
                 let mut world = state.world.lock().await;
                 let mut candidate = world.clone();
                 let result = candidate
@@ -207,15 +233,14 @@ async fn handle_client_message(state: &SharedState, text: &str) -> ServerMessage
                         *world = candidate;
                         Ok(())
                     });
-                (result, ServerMessage::snapshot(&world))
+                let applied_sequence = result.is_ok().then(|| state.publish_snapshot(&world));
+                (result, applied_sequence)
             };
-            if result.is_ok() {
-                let _ = state.snapshots.send(snapshot);
-            }
             ServerMessage::CommandResult {
                 request_id,
                 ok: result.is_ok(),
                 error: result.err().map(|error| error.to_string()),
+                applied_sequence,
             }
         }
         Err(error) => {
@@ -227,6 +252,7 @@ async fn handle_client_message(state: &SharedState, text: &str) -> ServerMessage
                 request_id,
                 ok: false,
                 error: Some(format!("invalid command: {error}")),
+                applied_sequence: None,
             }
         }
     }
@@ -256,9 +282,11 @@ mod tests {
             request_id: "request-7".into(),
             ok: true,
             error: None,
+            applied_sequence: Some(9),
         };
         let json = serde_json::to_value(result).unwrap();
         assert_eq!(json["type"], "command_result");
         assert_eq!(json["request_id"], "request-7");
+        assert_eq!(json["applied_sequence"], 9);
     }
 }

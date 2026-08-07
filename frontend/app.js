@@ -31,6 +31,8 @@ let ws = null;
 let reconnectTimer = 0;
 let reconnectAttempt = 0;
 let requestSequence = 0;
+let lastSnapshotSequence = 0;
+let minimumSnapshotSequence = 0;
 let world = { width: 1200, height: 800, wood: 0, units: [], trees: [], buildings: [] };
 let tick = 0;
 const camera = { x: 0, y: 0, zoom: 0.8 };
@@ -45,42 +47,11 @@ const assetPaths = {
 };
 
 function loadSprite(name, url) {
-  const asset = { image: null, ready: false };
+  const asset = { image: null };
   sprites[name] = asset;
   const image = new Image();
-  image.onload = () => {
-    try {
-      const source = document.createElement('canvas');
-      source.width = image.naturalWidth;
-      source.height = image.naturalHeight;
-      const sourceCtx = source.getContext('2d', { willReadFrequently: true });
-      sourceCtx.drawImage(image, 0, 0);
-      const pixels = sourceCtx.getImageData(0, 0, source.width, source.height);
-      let hasAlpha = false;
-      for (let i = 3; i < pixels.data.length; i += 4) {
-        if (pixels.data[i] < 250) { hasAlpha = true; break; }
-      }
-      if (!hasAlpha) {
-        const d = pixels.data;
-        const corners = [0, (source.width - 1) * 4, (source.width * (source.height - 1)) * 4];
-        const paleCorners = corners.every(i => d[i] > 225 && d[i + 1] > 225 && d[i + 2] > 225);
-        if (paleCorners) {
-          for (let i = 0; i < d.length; i += 4) {
-            const high = Math.min(d[i], d[i + 1], d[i + 2]);
-            const spread = Math.max(d[i], d[i + 1], d[i + 2]) - high;
-            if (high > 238 || (high > 220 && spread < 18)) d[i + 3] = 0;
-          }
-          sourceCtx.putImageData(pixels, 0, 0);
-        }
-      }
-      asset.image = source;
-    } catch (error) {
-      console.warn('Sprite processing failed; using original RGBA image', url, error);
-      asset.image = image;
-    }
-    asset.ready = true;
-  };
-  image.onerror = () => { asset.ready = true; console.warn('Sprite failed to load', url); };
+  image.onload = () => { asset.image = image; };
+  image.onerror = () => { console.warn('Sprite failed to load', url); };
   image.src = url;
 }
 
@@ -263,7 +234,10 @@ function render(now) {
     ...world.buildings.map(data => ({ type: 'building', data })),
     ...world.units.map(data => ({ type: 'unit', data }))
   ];
-  entities.sort((a, b) => (Number(a.data.y) || 0) - (Number(b.data.y) || 0));
+  entities.sort((a, b) => {
+    const depth = item => (Number(item.data.x) || 0) + (Number(item.data.y) || 0);
+    return depth(a) - depth(b);
+  });
   entities.forEach(item => drawEntity(item, now));
 }
 
@@ -292,7 +266,7 @@ function updateHud() {
   selection.className = '';
   selection.replaceChildren();
   const name = document.createElement('strong');
-  name.textContent = unit.name || `Agent ${unit.id}`;
+  name.textContent = unit.name || `Villager ${unit.id}`;
   const status = document.createElement('span');
   status.textContent = `${unit.state || 'idle'} · tick ${tick}`;
   selection.append(name, status);
@@ -332,7 +306,6 @@ function hitAt(x, y) {
 function handleTap(x, y) {
   const hit = hitAt(x, y);
   if (buildMode) {
-    if (hit) { showToast('Choose open ground'); return; }
     const ground = screenToWorld(x, y);
     if (ground.x < 0 || ground.y < 0 || ground.x > world.width || ground.y > world.height) {
       showToast('Choose ground inside the map');
@@ -442,6 +415,8 @@ function connect() {
   socket.onopen = () => {
     if (ws !== socket) return;
     reconnectAttempt = 0;
+    lastSnapshotSequence = 0;
+    minimumSnapshotSequence = 0;
     connection.className = 'online';
     connection.textContent = 'Connected';
   };
@@ -449,6 +424,9 @@ function connect() {
     try {
       const message = JSON.parse(event.data);
       if (message.type === 'snapshot' && message.world) {
+        const sequence = Number(message.sequence) || 0;
+        if (sequence < minimumSnapshotSequence || sequence <= lastSnapshotSequence) return;
+        lastSnapshotSequence = sequence;
         const next = message.world;
         const withPosition = item => ({
           ...item,
@@ -488,6 +466,7 @@ function connect() {
         updateHud();
       } else if (message.type === 'command_result') {
         const failed = message.ok === false || message.success === false || message.error;
+        if (!failed) minimumSnapshotSequence = Math.max(minimumSnapshotSequence, Number(message.applied_sequence) || 0);
         showToast(failed ? (message.error || message.message || 'Command failed') : (message.message || 'Command accepted'));
       }
     } catch (error) {
