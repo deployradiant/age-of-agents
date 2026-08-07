@@ -53,8 +53,6 @@ def web():
     proc = subprocess.Popen(
         ["/app/target/release/age-of-agents"],
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
     )
     # Don't call wait() — Modal needs the function to return so the
     # web_server can start proxying. The Rust binary runs in background.
