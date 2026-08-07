@@ -63,7 +63,8 @@ The target is a warm, hand-drawn cel-animation look inspired by pastoral Japanes
 
 ## Workflow
 
-- Work directly on `master`; this is a solo project.
-- Commit and push finished, verified work straight to `master`.
+- Parent-session work may proceed directly on `master` for this solo project.
+- Every delegated subagent must work on its own feature branch or git worktree, push that branch, and open a pull request for Jakob to review. Subagents must never commit directly to `master`.
+- A subagent PR must describe its scope, verification performed, generated assets, and any known limitations. Do not merge it automatically.
 - After changes: format, test, lint, perform the thermonuclear review, verify the browser demo, and redeploy Modal.
 - Keep `README.md` and `ROADMAP.md` synchronized with actual behavior.
