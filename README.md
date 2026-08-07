@@ -60,7 +60,7 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 ## Controls
 
 - **Select:** tap/click a villager.
-- **Gather:** with a villager selected, tap/click a tree.
+- **Gather:** with a villager selected, tap/click a tree. Harvested trees remain visible as depleted stumps and cannot receive new gather orders.
 - **Build:** select a villager, press the build button, then tap/click valid ground.
 - **Pan:** drag with one pointer.
 - **Zoom:** pinch or use the mouse wheel.

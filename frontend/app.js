@@ -51,6 +51,7 @@ const assetPaths = {
   gather: '/assets/game/agent_gather.png',
   build: '/assets/game/agent_build.png',
   tree: '/assets/game/resource_tree.png',
+  treeDepleted: '/assets/game/resource_tree_depleted.png',
   building: '/assets/game/building_town_center.png',
   meadow: '/assets/game/terrain_meadow.png',
   forest: '/assets/game/terrain_forest.png',
@@ -309,7 +310,12 @@ function drawEntity(item, now) {
     ctx.stroke();
   }
 
-  const asset = item.type === 'unit' ? spriteForUnit(item.data, now) : sprites[item.type];
+  const depletedTree = item.type === 'tree' && Number(item.data.wood) <= 0;
+  const asset = item.type === 'unit'
+    ? spriteForUnit(item.data, now)
+    : depletedTree
+      ? (sprites.treeDepleted?.image ? sprites.treeDepleted : sprites.tree)
+      : sprites[item.type];
   if (asset && asset.image) {
     const ratio = asset.image.width / asset.image.height;
     const drawWidth = width * Math.min(1.35, Math.max(0.72, ratio));
@@ -318,6 +324,7 @@ function drawEntity(item, now) {
     fallbackEntity(item.data, item.type, point, camera.zoom);
   }
 
+  if (depletedTree) return;
   hits.push({
     type: item.type,
     data: item.data,
@@ -440,6 +447,7 @@ function handleTap(x, y) {
     selectedUnitId = hit.data.id;
     updateHud();
   } else if (hit.type === 'tree') {
+    if (Number(hit.data.wood) <= 0) return;
     const unit = selectedUnit();
     if (unit) sendCommand({ type: 'gather', unit_id: unit.id, tree_id: hit.data.id });
     else showToast('Select an agent first');
