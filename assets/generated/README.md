@@ -12,6 +12,12 @@ Prompt:
 
 > A clean 2x2 character animation sprite sheet for a small 2D isometric real-time strategy game. SAME single young Mediterranean village worker in all four cells, identical face, short wavy dark brown hair, teal short tunic, brown belt pouch, burgundy trousers, same scale and fixed three-quarter isometric camera. Cell 1 idle standing; cell 2 walking contact pose; cell 3 walking passing pose; cell 4 chopping/gathering wood with a small hand axe. Thin dark-brown ink contours like a refined European comic, warm hand-drawn Japanese cel animation, flat muted colors, restrained cool shadows, simple readable silhouette at 40 pixels tall. Pure uniform white background, no scenery, no ground plane, no labels, no borders, no grid lines, no text, no cast shadows. Each figure centered in its quadrant with feet on the same baseline and equal height. Not photorealistic, not painterly, not 3D.
 
+### `agent_build.png`
+
+Generated on 2026-08-07 with the configured FAL image backend (`FLUX 2 Klein 9B`) using the existing idle, walk, and gather frames as identity/style references. The prompt kept the same young Mediterranean villager, teal tunic, burgundy trousers, dark-brown contours, fixed three-quarter view, and upper-left cel lighting while posing him leaning into a two-handed wooden mallet swing.
+
+The selected iteration was cut out with FAL BiRefNet, filtered to remove near-transparent background noise, scaled to the shared 214-pixel character height, anchored to the shared `y = 232` feet baseline, and saved as 8-bit sRGB RGBA. Nearest visible edge colors were dilated beneath fully transparent pixels to prevent texture-filtering fringes. No temporary generation URL is retained.
+
 ### `props_sheet.png`
 
 Source URL: `https://v3b.fal.media/files/b/0aa5122c/Q8L4UHCDN6-Gy7QsJy3-N_MzCTHgRL.png`

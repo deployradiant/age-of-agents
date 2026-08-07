@@ -44,6 +44,7 @@ const assetPaths = {
   walk1: '/assets/game/agent_walk_01.png',
   walk2: '/assets/game/agent_walk_02.png',
   gather: '/assets/game/agent_gather.png',
+  build: '/assets/game/agent_build.png',
   tree: '/assets/game/resource_tree.png',
   building: '/assets/game/building_town_center.png',
   dirt: '/assets/game/tile_dirt.png',
@@ -214,6 +215,10 @@ function drawConstructionSites() {
 
 function spriteForUnit(unit, now) {
   if (unit.state === 'gathering') return sprites.gather;
+  if (unit.state === 'building') {
+    const frames = [sprites.build, sprites.idle];
+    return frames[Math.floor(now / 260) % frames.length];
+  }
   if (unit.state === 'moving') {
     const frames = [sprites.walk1, sprites.idle, sprites.walk2];
     return frames[Math.floor(now / 170) % frames.length];

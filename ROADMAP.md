@@ -70,6 +70,7 @@ Required set:
 | `agent_walk_01.png` | 256×256 | 40×40 | same baseline and identity |
 | `agent_walk_02.png` | 256×256 | 40×40 | same baseline and identity |
 | `agent_gather.png` | 256×256 | 40×40 | same baseline and identity |
+| `agent_build.png` | 256×256 | 40×40 | same baseline and identity |
 | `resource_tree.png` | 256×256 | 35×35 | trunk bottom-center |
 | `building_town_center.png` | 512×512 | 80×80 | footprint bottom-center |
 | terrain tile variants | 96×96 | renderer-defined | seamless square source |
