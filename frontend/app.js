@@ -9,6 +9,7 @@ const buildButton = document.getElementById('build');
 const cancelButton = document.getElementById('cancel');
 const placementHint = document.getElementById('placement');
 const toast = document.getElementById('toast');
+const laptopModeQuery = window.matchMedia('(min-width: 900px) and (hover: hover) and (pointer: fine)');
 
 const TILE = 80;
 const MIN_ZOOM = 0.35;
@@ -38,6 +39,9 @@ let minimumSnapshotSequence = 0;
 let world = { width: 1200, height: 800, wood: 0, units: [], trees: [], buildings: [] };
 let tick = 0;
 const camera = { x: 0, y: 0, zoom: 0.8 };
+const pressedPanKeys = new Set();
+let previousFrameTime = null;
+let hoveredHit = null;
 
 const assetPaths = {
   idle: '/assets/game/agent_idle.png',
@@ -97,6 +101,29 @@ function centerCamera() {
   const fit = Math.min(cssWidth / Math.max(world.width, world.height), cssHeight / ((world.width + world.height) / 2));
   camera.zoom = Math.max(MIN_ZOOM, Math.min(1.1, fit * 1.45));
   cameraReady = true;
+}
+
+function clampCamera() {
+  const horizontalMargin = cssWidth * 0.35 / camera.zoom;
+  const verticalMargin = cssHeight * 0.35 / camera.zoom;
+  camera.x = Math.max(-world.height / 2 - horizontalMargin, Math.min(world.width / 2 + horizontalMargin, camera.x));
+  camera.y = Math.max(-verticalMargin, Math.min((world.width + world.height) / 4 + verticalMargin, camera.y));
+}
+
+function panCameraWithKeyboard(elapsedSeconds) {
+  if (!laptopModeQuery.matches || pressedPanKeys.size === 0) return;
+  let x = 0;
+  let y = 0;
+  if (pressedPanKeys.has('KeyA') || pressedPanKeys.has('ArrowLeft')) x -= 1;
+  if (pressedPanKeys.has('KeyD') || pressedPanKeys.has('ArrowRight')) x += 1;
+  if (pressedPanKeys.has('KeyW') || pressedPanKeys.has('ArrowUp')) y -= 1;
+  if (pressedPanKeys.has('KeyS') || pressedPanKeys.has('ArrowDown')) y += 1;
+  if (x === 0 && y === 0) return;
+  const length = Math.hypot(x, y);
+  const distance = 440 * Math.min(elapsedSeconds, 0.05) / camera.zoom;
+  camera.x += x / length * distance;
+  camera.y += y / length * distance;
+  clampCamera();
 }
 
 function resize() {
@@ -252,6 +279,16 @@ function drawEntity(item, now) {
     ctx.strokeStyle = '#ffdb67'; ctx.lineWidth = 2; ctx.stroke();
   }
 
+  if (hoveredHit?.type === item.type && hoveredHit.data.id === item.data.id) {
+    ctx.beginPath();
+    ctx.ellipse(point.x, point.y, 29 * camera.zoom, 14 * camera.zoom, 0, 0, Math.PI * 2);
+    ctx.fillStyle = item.type === 'tree' ? '#8ed06a33' : '#ffe08a22';
+    ctx.fill();
+    ctx.strokeStyle = item.type === 'tree' ? '#9bdc76' : '#ffe08a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   const asset = item.type === 'unit' ? spriteForUnit(item.data, now) : sprites[item.type];
   if (asset && asset.image) {
     const ratio = asset.image.width / asset.image.height;
@@ -273,6 +310,8 @@ function drawEntity(item, now) {
 
 function render(now) {
   requestAnimationFrame(render);
+  if (previousFrameTime !== null) panCameraWithKeyboard((now - previousFrameTime) / 1000);
+  previousFrameTime = now;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#17231b';
   ctx.fillRect(0, 0, cssWidth, cssHeight);
@@ -328,7 +367,7 @@ function setBuildMode(enabled) {
   buildButton.classList.toggle('active', buildMode);
   cancelButton.classList.toggle('visible', buildMode);
   placementHint.classList.toggle('visible', buildMode);
-  canvas.style.cursor = buildMode ? 'crosshair' : '';
+  updateCursor();
 }
 
 function cancelBuild() {
@@ -351,6 +390,13 @@ function hitAt(x, y) {
     if (x >= hit.left && x <= hit.right && y >= hit.top && y <= hit.bottom) return hit;
   }
   return null;
+}
+
+function updateCursor(x, y) {
+  if (Number.isFinite(x) && Number.isFinite(y)) hoveredHit = hitAt(x, y);
+  if (buildMode) canvas.style.cursor = 'crosshair';
+  else if (laptopModeQuery.matches && (hoveredHit?.type === 'unit' || hoveredHit?.type === 'tree')) canvas.style.cursor = 'pointer';
+  else canvas.style.cursor = laptopModeQuery.matches ? 'grab' : '';
 }
 
 function handleTap(x, y) {
@@ -406,7 +452,10 @@ function onPointerDown(event) {
 
 function onPointerMove(event) {
   const pointer = pointers.get(event.pointerId);
-  if (!pointer) return;
+  if (!pointer) {
+    if (event.pointerType === 'mouse') updateCursor(event.clientX, event.clientY);
+    return;
+  }
   event.preventDefault();
   pointer.x = event.clientX;
   pointer.y = event.clientY;
@@ -418,12 +467,14 @@ function onPointerMove(event) {
     camera.zoom = nextZoom;
     camera.x = pinch.anchor.x - (middle.x - cssWidth / 2) / nextZoom;
     camera.y = pinch.anchor.y - (middle.y - cssHeight * 0.42) / nextZoom;
+    clampCamera();
   } else {
     const moved = Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
     if (moved > DRAG_THRESHOLD) pointer.dragging = true;
     if (pointer.dragging) {
       camera.x -= (pointer.x - pointer.lastX) / camera.zoom;
       camera.y -= (pointer.y - pointer.lastY) / camera.zoom;
+      clampCamera();
       gestureUsed = true;
     }
   }
@@ -452,6 +503,35 @@ function zoomAt(x, y, factor) {
   camera.zoom = next;
   camera.x = anchor.x - (x - cssWidth / 2) / next;
   camera.y = anchor.y - (y - cssHeight * 0.42) / next;
+  clampCamera();
+}
+
+function shortcutTargetIsInteractive(target) {
+  return target instanceof Element && Boolean(target.closest('input, textarea, select, button, summary, a[href], [contenteditable], [role="button"], [role="textbox"]'));
+}
+
+function onKeyDown(event) {
+  if (!laptopModeQuery.matches || shortcutTargetIsInteractive(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(event.code)) {
+    pressedPanKeys.add(event.code);
+    event.preventDefault();
+  } else if (event.code === 'KeyB' && !event.repeat && selectedUnit()) {
+    setBuildMode(true);
+    event.preventDefault();
+  } else if (event.key === 'Escape' && buildMode) {
+    cancelBuild();
+    event.preventDefault();
+  }
+}
+
+function onKeyUp(event) {
+  pressedPanKeys.delete(event.code);
+}
+
+function updateLaptopMode() {
+  pressedPanKeys.clear();
+  placementHint.textContent = laptopModeQuery.matches ? 'Click ground to build · Escape to cancel' : 'Tap ground to build · Escape to cancel';
+  updateCursor();
 }
 
 function connect() {
@@ -546,11 +626,15 @@ canvas.addEventListener('wheel', event => {
   event.preventDefault();
   zoomAt(event.clientX, event.clientY, Math.exp(-event.deltaY * 0.0012));
 }, { passive: false });
-window.addEventListener('keydown', event => { if (event.key === 'Escape') cancelBuild(); });
+window.addEventListener('keydown', onKeyDown);
+window.addEventListener('keyup', onKeyUp);
+window.addEventListener('blur', () => pressedPanKeys.clear());
+laptopModeQuery.addEventListener('change', updateLaptopMode);
 window.addEventListener('online', connect);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && (!ws || ws.readyState > WebSocket.OPEN)) connect(); });
 new ResizeObserver(resize).observe(canvas);
 resize();
+updateLaptopMode();
 updateHud();
 connect();
 requestAnimationFrame(render);
