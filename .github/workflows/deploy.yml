@@ -23,6 +23,8 @@ jobs:
           cargo fmt --check
           cargo test --locked
           cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: Install asset-check dependencies
+        run: python3 -m pip install --disable-pip-version-check numpy==2.4.3 Pillow==12.3.0
       - name: Verify frontend and deployment files
         run: |
           node --check frontend/app.js
