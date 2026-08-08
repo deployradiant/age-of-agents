@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn typed_command_and_result_use_request_id() {
         let message: ClientMessage = serde_json::from_str(
-            r#"{"type":"command","request_id":"request-7","command":{"type":"gather","unit_id":"villager-1","tree_id":"tree-1"}}"#,
+            r#"{"type":"command","request_id":"request-7","command":{"type":"gather","unit_id":"villager-1","resource_id":"tree-1"}}"#,
         )
         .unwrap();
         assert!(matches!(
@@ -349,16 +349,15 @@ mod tests {
         assert_eq!(json["type"], "snapshot");
         assert_eq!(json["sequence"], 4);
         assert_eq!(json["world"]["width"], 2400.0);
-        assert!(
-            json["world"]["terrain"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|cell| matches!(
-                    cell["visibility"].as_str(),
-                    Some("unseen" | "explored" | "visible")
-                ))
-        );
-        assert!(json["world"]["trees"].as_array().unwrap().len() < 4);
+        let terrain = json["world"]["terrain"].as_array().unwrap();
+        assert!(terrain.iter().all(|cell| matches!(
+            cell["visibility"].as_str(),
+            Some("unseen" | "explored" | "visible")
+        )));
+        assert!(terrain.iter().all(|cell| {
+            let is_unseen = cell["visibility"] == "unseen";
+            is_unseen == cell.get("biome").is_none()
+        }));
+        assert!(json["world"]["resources"].as_array().unwrap().len() < 14);
     }
 }

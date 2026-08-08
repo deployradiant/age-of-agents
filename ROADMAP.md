@@ -10,26 +10,28 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 
 - Deterministic maximum-size 2400×1600 map, generated once as 600 persisted cells.
 - Eight meaningful, individually connected Voronoi-style biome regions.
-- Persistent explored fog; unit/building sight produces visible, explored-dim, and unseen-dark terrain, and unseen entities are omitted from client snapshots.
-- Two villagers, initially idle.
-- Four wood-bearing trees.
-- One shared wood stockpile.
-- One buildable building type: town center.
+- Persistent explored fog; unit/building sight produces visible, explored-dim, and unseen-dark terrain. Never-seen entities are omitted, while discovered static resources remain as dimmed map memory.
+- Two villagers, initially idle, and one starting town-center base.
+- Wood-bearing trees, food-bearing berry bushes, and stone deposits.
+- Shared wood, food, and stone stockpiles.
+- One buildable building type: town center, with one active production slot and a typed set of allowed products.
 - No autonomous task selection, random world generation, resource regeneration, combat, health, or LLM behavior.
 
 ### Simulation
 
 - An idle villager does nothing across arbitrary ticks.
-- A gather order makes the villager walk to the selected tree.
-- At the tree, the villager gathers wood at a deterministic rate until depletion.
-- Gathered wood enters the shared stockpile.
-- When the tree is depleted, the villager becomes idle.
+- A move order makes an idle villager walk to valid selected ground and reveal terrain along the route.
+- A gather order makes the villager walk to the selected resource.
+- At the resource, the villager gathers its typed material at a deterministic rate until depletion.
+- Gathered material enters the matching shared stockpile.
+- When the resource is depleted, the villager becomes idle.
 - A build order validates the selected villager, position, and wood cost.
 - Wood is reserved exactly once when the build order is accepted.
 - The villager walks to the site and visibly constructs for four seconds.
 - The building appears exactly once after construction finishes.
 - The villager becomes idle afterward.
 - Busy villagers reject replacement orders for this milestone.
+- A town center can produce one villager at a time from its allowed product set, reserving 50 food exactly once and completing after six seconds.
 
 ### Persistence and networking
 
@@ -46,7 +48,9 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - Fixed isometric Canvas tile map with no visible seams and exactly eight production terrain textures.
 - Entities draw in stable ground-depth order.
 - Tap/click selects a villager.
-- Tap/click a tree to gather.
+- With a villager selected, tap/click empty ground to move.
+- Tap/click a tree, berry bush, or stone deposit to gather.
+- Tap/click a town center to select it and train one villager at a time.
 - Build image button enters placement mode; tap/click ground to build.
 - Drag pans; wheel/pinch zooms.
 - Touch targets are at least 48×48 CSS pixels and respect mobile safe areas.
@@ -71,9 +75,12 @@ Required set:
 | `agent_idle.png` | 256×256 | 40×40 | feet at `(0.5, 0.875)` |
 | `agent_walk_01.png` | 256×256 | 40×40 | same baseline and identity |
 | `agent_walk_02.png` | 256×256 | 40×40 | same baseline and identity |
+| six directional walk frames | 256×256 | 40×40 | diagonal-toward, down-front, and up-back two-frame cycles |
 | `agent_gather.png` | 256×256 | 40×40 | same baseline and identity |
 | `agent_build.png` | 256×256 | 40×40 | same baseline and identity |
 | `resource_tree.png` | 256×256 | 35×35 | trunk bottom-center |
+| `resource_berries.png` | 256×256 | 35×35 | bush bottom-center |
+| `resource_stone.png` | 256×256 | 35×35 | outcrop bottom-center |
 | `building_town_center.png` | 512×512 | 80×80 | footprint bottom-center |
 | eight biome terrain textures | 96×96 | renderer-defined | seamless square source |
 | build/cancel controls | 128×128 | 48×48 minimum | centered icon |

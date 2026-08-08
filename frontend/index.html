@@ -19,7 +19,11 @@
       background: linear-gradient(#171e14f2, #11170de6); border-bottom: 1px solid #77643c;
       font-size: 13px; line-height: 20px; box-shadow: 0 2px 10px #0008;
     }
-    #wood strong { color: #f0ce7a; font-variant-numeric: tabular-nums; }
+    #stockpiles { display: flex; align-items: center; gap: 14px; }
+    #stockpiles strong { font-variant-numeric: tabular-nums; }
+    #wood strong { color: #f0ce7a; }
+    #food strong { color: #c98d83; }
+    #stone strong { color: #b8c0b5; }
     #top-actions { display: flex; align-items: center; gap: 10px; }
     #connection { color: #d9aa70; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
     #connection.online { color: #9fd37b; }
@@ -90,13 +94,14 @@
 </head>
 <body>
   <main id="game" aria-label="Isometric game world"><canvas id="world"></canvas></main>
-  <header id="resources"><span id="wood">Wood <strong>0</strong></span><span id="top-actions"><button id="reset-world" type="button">Reset world</button><span id="connection">Connecting</span></span></header>
-  <aside id="selection" class="empty">Tap a villager to select</aside>
+  <header id="resources"><span id="stockpiles"><span id="wood">Wood <strong>0</strong></span><span id="food">Food <strong>0</strong></span><span id="stone">Stone <strong>0</strong></span></span><span id="top-actions"><button id="reset-world" type="button">Reset world</button><span id="connection">Connecting</span></span></header>
+  <aside id="selection" class="empty">Tap a villager or town center</aside>
   <div id="placement">Tap ground to build · Escape to cancel</div>
   <div id="toast" role="status" aria-live="polite"></div>
-  <details id="laptop-help"><summary>Keyboard &amp; mouse</summary><p>WASD or arrows pan · Wheel zooms · B builds · Escape cancels</p></details>
-  <nav id="dock" aria-label="Unit commands">
+  <details id="laptop-help"><summary>Keyboard &amp; mouse</summary><p>Select a villager, then click ground to move or a resource to gather · Select the town center to train villagers · WASD or arrows pan · Wheel zooms · B builds · Escape cancels</p></details>
+  <nav id="dock" aria-label="Commands">
     <button id="build" class="command" disabled aria-label="Build town center" title="Build town center"><img src="/assets/game/command_build.png" alt=""><span>Build</span></button>
+    <button id="train-villager" class="command" disabled aria-label="Train villager for 50 food" title="Train villager (50 food)"><img src="/assets/game/agent_idle.png" alt=""><span>Villager</span></button>
     <button id="cancel" class="command" aria-label="Cancel placement" title="Cancel placement"><img src="/assets/game/command_cancel.png" alt=""><span>Cancel</span></button>
   </nav>
   <script src="/frontend/app.js"></script>

@@ -3,9 +3,12 @@
 const canvas = document.getElementById('world');
 const ctx = canvas.getContext('2d', { alpha: false });
 const woodValue = document.querySelector('#wood strong');
+const foodValue = document.querySelector('#food strong');
+const stoneValue = document.querySelector('#stone strong');
 const connection = document.getElementById('connection');
 const selection = document.getElementById('selection');
 const buildButton = document.getElementById('build');
+const trainButton = document.getElementById('train-villager');
 const cancelButton = document.getElementById('cancel');
 const resetWorldButton = document.getElementById('reset-world');
 const placementHint = document.getElementById('placement');
@@ -25,6 +28,7 @@ let cssWidth = 1;
 let cssHeight = 1;
 let dpr = 1;
 let selectedUnitId = null;
+let selectedBuildingId = null;
 let buildMode = false;
 let cameraReady = false;
 let receivedSnapshot = false;
@@ -37,7 +41,7 @@ let reconnectAttempt = 0;
 let requestSequence = 0;
 let lastSnapshotSequence = 0;
 let minimumSnapshotSequence = 0;
-let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, terrain: [], units: [], trees: [], buildings: [] };
+let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, food: 0, stone: 0, terrain: [], units: [], resources: [], buildings: [] };
 let tick = 0;
 const camera = { x: 0, y: 0, zoom: 0.8 };
 const pressedPanKeys = new Set();
@@ -49,10 +53,18 @@ const assetPaths = {
   idle: '/assets/game/agent_idle.png',
   walk1: '/assets/game/agent_walk_01.png',
   walk2: '/assets/game/agent_walk_02.png',
+  walkDiagToward1: '/assets/game/agent_walk_diag_toward_01.png',
+  walkDiagToward2: '/assets/game/agent_walk_diag_toward_02.png',
+  walkDown1: '/assets/game/agent_walk_down_01.png',
+  walkDown2: '/assets/game/agent_walk_down_02.png',
+  walkUp1: '/assets/game/agent_walk_up_01.png',
+  walkUp2: '/assets/game/agent_walk_up_02.png',
   gather: '/assets/game/agent_gather.png',
   build: '/assets/game/agent_build.png',
   tree: '/assets/game/resource_tree.png',
   treeDepleted: '/assets/game/resource_tree_depleted.png',
+  berries: '/assets/game/resource_berries.png',
+  stone: '/assets/game/resource_stone.png',
   building: '/assets/game/building_town_center.png',
   meadow: '/assets/game/terrain_meadow.png',
   forest: '/assets/game/terrain_forest.png',
@@ -183,9 +195,14 @@ function buildGroundLayer(columns, rows) {
   for (const cell of world.terrain) {
     const left = cell.column * sourceSize;
     const top = cell.row * sourceSize;
+    if (cell.visibility === 'unseen' || !cell.biome) {
+      layerContext.fillStyle = '#020504';
+      layerContext.fillRect(left, top, sourceSize, sourceSize);
+      continue;
+    }
     layerContext.drawImage(sprites[biomeTextures[cell.biome]].image, left, top, sourceSize, sourceSize);
-    if (cell.visibility !== 'visible') {
-      layerContext.fillStyle = cell.visibility === 'explored' ? '#08100ba8' : '#020504f2';
+    if (cell.visibility === 'explored') {
+      layerContext.fillStyle = '#08100bc4';
       layerContext.fillRect(left, top, sourceSize, sourceSize);
     }
   }
@@ -257,6 +274,23 @@ function drawConstructionSites() {
   }
 }
 
+function walkPresentation(position, target) {
+  if (!target) return { direction: 'side', flip: false };
+  const dx = Number(target.x) - Number(position.x);
+  const dy = Number(target.y) - Number(position.y);
+  const screenX = dx - dy;
+  const screenY = (dx + dy) / 2;
+  const vertical = Math.abs(screenX) <= Math.abs(screenY) * 0.55;
+  const direction = vertical
+    ? (screenY >= 0 ? 'down' : 'up')
+    : screenY > 0
+      ? 'diag_toward'
+      : Math.abs(screenY) > Math.abs(screenX) * 0.2
+        ? 'up'
+        : 'side';
+  return { direction, flip: !vertical && screenX > 0 };
+}
+
 function spriteForUnit(unit, now) {
   if (unit.state === 'gathering') return sprites.gather;
   if (unit.state === 'building') {
@@ -264,8 +298,14 @@ function spriteForUnit(unit, now) {
     return frames[Math.floor(now / 260) % frames.length];
   }
   if (unit.state === 'moving') {
-    const frames = [sprites.walk1, sprites.idle, sprites.walk2];
-    return frames[Math.floor(now / 170) % frames.length];
+    const frames = unit.walkDirection === 'down'
+      ? [sprites.walkDown1, sprites.walkDown2]
+      : unit.walkDirection === 'up'
+        ? [sprites.walkUp1, sprites.walkUp2]
+        : unit.walkDirection === 'diag_toward'
+          ? [sprites.walkDiagToward1, sprites.walkDiagToward2]
+          : [sprites.walk1, sprites.walk2];
+    return frames[Math.floor(now / 190) % frames.length];
   }
   return sprites.idle;
 }
@@ -277,9 +317,16 @@ function fallbackEntity(entity, type, point, scale) {
     ctx.fillStyle = '#e6c273';
     ctx.beginPath(); ctx.arc(0, -22 * scale, 12 * scale, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#31586b'; ctx.fillRect(-10 * scale, -14 * scale, 20 * scale, 28 * scale);
-  } else if (type === 'tree') {
-    ctx.fillStyle = '#6a4328'; ctx.fillRect(-5 * scale, -30 * scale, 10 * scale, 32 * scale);
-    ctx.fillStyle = '#275a30'; ctx.beginPath(); ctx.arc(0, -42 * scale, 24 * scale, 0, Math.PI * 2); ctx.fill();
+  } else if (type === 'resource') {
+    if (entity.kind === 'food') {
+      ctx.fillStyle = '#6c8240'; ctx.beginPath(); ctx.arc(0, -18 * scale, 22 * scale, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#a94f58'; ctx.beginPath(); ctx.arc(-6 * scale, -20 * scale, 4 * scale, 0, Math.PI * 2); ctx.fill();
+    } else if (entity.kind === 'stone') {
+      ctx.fillStyle = '#69706a'; ctx.beginPath(); ctx.moveTo(-24 * scale, 0); ctx.lineTo(-12 * scale, -38 * scale); ctx.lineTo(10 * scale, -46 * scale); ctx.lineTo(26 * scale, 0); ctx.fill();
+    } else {
+      ctx.fillStyle = '#6a4328'; ctx.fillRect(-5 * scale, -30 * scale, 10 * scale, 32 * scale);
+      ctx.fillStyle = '#275a30'; ctx.beginPath(); ctx.arc(0, -42 * scale, 24 * scale, 0, Math.PI * 2); ctx.fill();
+    }
   } else {
     ctx.fillStyle = '#765639'; ctx.fillRect(-32 * scale, -38 * scale, 64 * scale, 38 * scale);
     ctx.fillStyle = '#a56742'; ctx.beginPath(); ctx.moveTo(-38 * scale, -38 * scale); ctx.lineTo(0, -68 * scale); ctx.lineTo(38 * scale, -38 * scale); ctx.fill();
@@ -287,16 +334,26 @@ function fallbackEntity(entity, type, point, scale) {
   ctx.restore();
 }
 
+function visibilityAtWorldPosition(x, y) {
+  const column = Math.floor(x / world.cellSize);
+  const row = Math.floor(y / world.cellSize);
+  return world.terrain.find(cell => cell.column === column && cell.row === row)?.visibility || 'unseen';
+}
+
 function drawEntity(item, now) {
   const point = project(Number(item.data.x) || 0, Number(item.data.y) || 0);
-  const scales = item.type === 'building' ? [150, 145] : item.type === 'tree' ? [105, 112] : [88, 94];
+  const resourceScales = item.data.kind === 'wood' ? [105, 112] : item.data.kind === 'food' ? [92, 78] : [100, 92];
+  const scales = item.type === 'building' ? [150, 145] : item.type === 'resource' ? resourceScales : [88, 94];
   const width = scales[0] * camera.zoom;
   const height = scales[1] * camera.zoom;
   if (point.x < -width || point.x > cssWidth + width || point.y < -height || point.y > cssHeight + height) return;
 
-  if (item.type === 'unit' && item.data.id === selectedUnitId) {
+  const selected = (item.type === 'unit' && item.data.id === selectedUnitId)
+    || (item.type === 'building' && item.data.id === selectedBuildingId);
+  if (selected) {
     ctx.beginPath();
-    ctx.ellipse(point.x, point.y, 24 * camera.zoom, 11 * camera.zoom, 0, 0, Math.PI * 2);
+    const radius = item.type === 'building' ? 40 : 24;
+    ctx.ellipse(point.x, point.y, radius * camera.zoom, radius * 0.46 * camera.zoom, 0, 0, Math.PI * 2);
     ctx.fillStyle = '#f6c74a44'; ctx.fill();
     ctx.strokeStyle = '#ffdb67'; ctx.lineWidth = 2; ctx.stroke();
   }
@@ -304,28 +361,55 @@ function drawEntity(item, now) {
   if (hoveredHit?.type === item.type && hoveredHit.data.id === item.data.id) {
     ctx.beginPath();
     ctx.ellipse(point.x, point.y, 29 * camera.zoom, 14 * camera.zoom, 0, 0, Math.PI * 2);
-    ctx.fillStyle = item.type === 'tree' ? '#8ed06a33' : '#ffe08a22';
+    ctx.fillStyle = item.type === 'resource' ? '#8ed06a33' : '#ffe08a22';
     ctx.fill();
-    ctx.strokeStyle = item.type === 'tree' ? '#9bdc76' : '#ffe08a';
+    ctx.strokeStyle = item.type === 'resource' ? '#9bdc76' : '#ffe08a';
     ctx.lineWidth = 2;
     ctx.stroke();
   }
 
-  const depletedTree = item.type === 'tree' && Number(item.data.wood) <= 0;
-  const asset = item.type === 'unit'
-    ? spriteForUnit(item.data, now)
-    : depletedTree
-      ? (sprites.treeDepleted?.image ? sprites.treeDepleted : sprites.tree)
-      : sprites[item.type];
+  const depletedResource = item.type === 'resource' && Number(item.data.amount) <= 0;
+  let asset;
+  if (item.type === 'unit') asset = spriteForUnit(item.data, now);
+  else if (item.type === 'building') asset = sprites.building;
+  else if (item.data.kind === 'wood') asset = depletedResource && sprites.treeDepleted?.image ? sprites.treeDepleted : sprites.tree;
+  else if (item.data.kind === 'food') asset = sprites.berries;
+  else asset = sprites.stone;
+  const remembered = item.type !== 'unit'
+    && visibilityAtWorldPosition(Number(item.data.x) || 0, Number(item.data.y) || 0) === 'explored';
+  ctx.save();
+  if (remembered) ctx.globalAlpha = 0.58;
+  if (depletedResource && item.data.kind !== 'wood') {
+    ctx.globalAlpha *= 0.48;
+    ctx.filter = 'grayscale(1) brightness(.65)';
+  }
   if (asset && asset.image) {
     const ratio = asset.image.width / asset.image.height;
     const drawWidth = width * Math.min(1.35, Math.max(0.72, ratio));
-    ctx.drawImage(asset.image, point.x - drawWidth / 2, point.y - height * 0.88, drawWidth, height);
+    if (item.type === 'unit' && item.data.walkFlip) {
+      ctx.save();
+      ctx.translate(point.x, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(asset.image, -drawWidth / 2, point.y - height * 0.88, drawWidth, height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(asset.image, point.x - drawWidth / 2, point.y - height * 0.88, drawWidth, height);
+    }
   } else {
     fallbackEntity(item.data, item.type, point, camera.zoom);
   }
+  ctx.restore();
 
-  if (depletedTree) return;
+  if (item.type === 'building' && item.data.production) {
+    const progress = Math.max(0, Math.min(1, Number(item.data.production.elapsed_seconds) / 6));
+    const barWidth = 78 * camera.zoom;
+    ctx.fillStyle = '#111b';
+    ctx.fillRect(point.x - barWidth / 2, point.y + 15 * camera.zoom, barWidth, 6 * camera.zoom);
+    ctx.fillStyle = '#e8bd51';
+    ctx.fillRect(point.x - barWidth / 2, point.y + 15 * camera.zoom, barWidth * progress, 6 * camera.zoom);
+  }
+
+  if (depletedResource) return;
   hits.push({
     type: item.type,
     data: item.data,
@@ -347,7 +431,7 @@ function render(now) {
   drawConstructionSites();
   hits.length = 0;
   const entities = [
-    ...world.trees.map(data => ({ type: 'tree', data })),
+    ...world.resources.map(data => ({ type: 'resource', data })),
     ...world.buildings.map(data => ({ type: 'building', data })),
     ...world.units.map(data => ({ type: 'unit', data }))
   ];
@@ -370,25 +454,63 @@ function selectedUnit() {
   return world.units.find(unit => unit.id === selectedUnitId) || null;
 }
 
+function selectedBuilding() {
+  return world.buildings.find(building => building.id === selectedBuildingId) || null;
+}
+
 function updateHud() {
-  woodValue.textContent = String(world.wood ?? 0);
+  woodValue.textContent = String(Math.floor(world.wood ?? 0));
+  foodValue.textContent = String(Math.floor(world.food ?? 0));
+  stoneValue.textContent = String(Math.floor(world.stone ?? 0));
   const unit = selectedUnit();
-  if (!unit) {
-    selectedUnitId = null;
-    selection.className = 'empty';
-    selection.textContent = 'Tap a villager to select';
-    buildButton.disabled = true;
-    if (buildMode) cancelBuild();
+  const building = selectedBuilding();
+  if (!unit) selectedUnitId = null;
+  if (!building) selectedBuildingId = null;
+  buildButton.disabled = !unit;
+  const canTrainVillager = Boolean(
+    building
+    && building.produces?.includes('villager')
+    && !building.production
+    && world.food >= 50
+  );
+  trainButton.disabled = !canTrainVillager;
+  trainButton.title = building?.production
+    ? 'Town center is already producing'
+    : world.food < 50
+      ? 'Train villager (50 food required)'
+      : 'Train villager (50 food)';
+
+  if (unit) {
+    selection.className = '';
+    selection.replaceChildren();
+    const name = document.createElement('strong');
+    name.textContent = unit.name || `Villager ${unit.id}`;
+    const status = document.createElement('span');
+    status.textContent = `${unit.state || 'idle'} · tick ${tick}`;
+    selection.append(name, status);
     return;
   }
-  selection.className = '';
-  selection.replaceChildren();
-  const name = document.createElement('strong');
-  name.textContent = unit.name || `Villager ${unit.id}`;
-  const status = document.createElement('span');
-  status.textContent = `${unit.state || 'idle'} · tick ${tick}`;
-  selection.append(name, status);
-  buildButton.disabled = false;
+
+  if (building) {
+    if (buildMode) cancelBuild();
+    selection.className = '';
+    selection.replaceChildren();
+    const name = document.createElement('strong');
+    name.textContent = building.kind === 'town_center' ? 'Town Center' : building.id;
+    const status = document.createElement('span');
+    if (building.production) {
+      const progress = Math.min(100, Math.floor(Number(building.production.elapsed_seconds) / 6 * 100));
+      status.textContent = `Producing villager · ${progress}%`;
+    } else {
+      status.textContent = 'Ready · produces villagers';
+    }
+    selection.append(name, status);
+    return;
+  }
+
+  selection.className = 'empty';
+  selection.textContent = 'Tap a villager or town center';
+  if (buildMode) cancelBuild();
 }
 
 function setBuildMode(enabled) {
@@ -427,7 +549,7 @@ function updateCursor(x, y) {
     hoveredHit = hitAt(x, y);
   }
   if (buildMode) canvas.style.cursor = 'crosshair';
-  else if (laptopModeQuery.matches && (hoveredHit?.type === 'unit' || hoveredHit?.type === 'tree')) canvas.style.cursor = 'pointer';
+  else if (laptopModeQuery.matches && (['unit', 'resource', 'building'].includes(hoveredHit?.type) || selectedUnit())) canvas.style.cursor = 'pointer';
   else canvas.style.cursor = laptopModeQuery.matches ? 'grab' : '';
 }
 
@@ -443,15 +565,28 @@ function handleTap(x, y) {
     if (unit && sendCommand({ type: 'build', unit_id: unit.id, x: ground.x, y: ground.y })) cancelBuild();
     return;
   }
-  if (!hit) return;
+  if (!hit) {
+    const unit = selectedUnit();
+    if (!unit) return;
+    const ground = screenToWorld(x, y);
+    if (ground.x < 0 || ground.y < 0 || ground.x > world.width || ground.y > world.height) return;
+    sendCommand({ type: 'move', unit_id: unit.id, x: ground.x, y: ground.y });
+    return;
+  }
   if (hit.type === 'unit') {
     selectedUnitId = hit.data.id;
+    selectedBuildingId = null;
     updateHud();
-  } else if (hit.type === 'tree') {
-    if (Number(hit.data.wood) <= 0) return;
+  } else if (hit.type === 'resource') {
+    if (Number(hit.data.amount) <= 0) return;
     const unit = selectedUnit();
-    if (unit) sendCommand({ type: 'gather', unit_id: unit.id, tree_id: hit.data.id });
+    if (unit) sendCommand({ type: 'gather', unit_id: unit.id, resource_id: hit.data.id });
     else showToast('Select an agent first');
+  } else if (hit.type === 'building') {
+    selectedBuildingId = hit.data.id;
+    selectedUnitId = null;
+    cancelBuild();
+    updateHud();
   }
 }
 
@@ -613,18 +748,27 @@ function connect() {
         const unitForDisplay = unit => {
           const action = unit.action?.type || 'idle';
           let state = 'idle';
-          if (action === 'gather') {
-            const tree = next.trees?.find(item => item.id === unit.action.tree_id);
-            const distance = tree ? Math.hypot(unit.position.x - tree.position.x, unit.position.y - tree.position.y) : Infinity;
+          let target = null;
+          if (action === 'move') {
+            state = 'moving';
+            target = unit.action;
+          } else if (action === 'gather') {
+            const resource = next.resources?.find(item => item.id === unit.action.resource_id);
+            const distance = resource ? Math.hypot(unit.position.x - resource.position.x, unit.position.y - resource.position.y) : Infinity;
             state = distance > 0.5 ? 'moving' : 'gathering';
+            target = resource?.position || null;
           } else if (action === 'build') {
             const distance = Math.hypot(unit.position.x - unit.action.x, unit.position.y - unit.action.y);
             state = distance > 0.5 ? 'moving' : 'building';
+            target = unit.action;
           }
+          const walk = walkPresentation(unit.position, target);
           return {
             ...withPosition(unit),
             name: unit.name || unit.id.replace(/^villager-/, 'Villager '),
-            state
+            state,
+            walkDirection: walk.direction,
+            walkFlip: walk.flip
           };
         };
         world = {
@@ -632,9 +776,11 @@ function connect() {
           height: Number(next.height) || 1600,
           cellSize: Number(next.cell_size) || TILE,
           wood: Number(next.stockpile?.wood) || 0,
+          food: Number(next.stockpile?.food) || 0,
+          stone: Number(next.stockpile?.stone) || 0,
           terrain: Array.isArray(next.terrain) ? next.terrain : [],
           units: Array.isArray(next.units) ? next.units.map(unitForDisplay) : [],
-          trees: Array.isArray(next.trees) ? next.trees.map(withPosition) : [],
+          resources: Array.isArray(next.resources) ? next.resources.map(withPosition) : [],
           buildings: Array.isArray(next.buildings) ? next.buildings.map(withPosition) : []
         };
         tick = Number(next.tick) || 0;
@@ -671,6 +817,7 @@ async function resetWorld() {
     const response = await fetch('/reset', { method: 'POST' });
     if (!response.ok) throw new Error(await response.text() || `Reset failed (${response.status})`);
     selectedUnitId = null;
+    selectedBuildingId = null;
     cancelBuild();
     showToast('World reset');
   } catch (error) {
@@ -681,6 +828,10 @@ async function resetWorld() {
 }
 
 buildButton.addEventListener('click', () => setBuildMode(!buildMode));
+trainButton.addEventListener('click', () => {
+  const building = selectedBuilding();
+  if (building) sendCommand({ type: 'produce', building_id: building.id, product: 'villager' });
+});
 cancelButton.addEventListener('click', cancelBuild);
 resetWorldButton.addEventListener('click', resetWorld);
 canvas.addEventListener('pointerdown', onPointerDown);

@@ -2,16 +2,17 @@
 
 A deliberately small, mobile-first 2D isometric RTS vertical slice built with a Rust authoritative server, Canvas 2D frontend, WebSocket state streaming, and SQLite persistence.
 
-The initial goal is intentionally narrow: select a villager, gather wood from a tree, and spend that wood to construct one building. There are no LLM agents or autonomous NPC policies in this milestone. Villagers remain idle until commanded.
+The initial goal is intentionally narrow: command villagers to gather a small three-resource economy, construct town centers, and train villagers one at a time. There are no LLM agents or autonomous NPC policies in this milestone. Villagers remain idle until commanded.
 
 ## Milestone 1
 
 - Persistent deterministic 2400×1600 Voronoi-style world with eight connected biomes
 - Server-authoritative fog with visible, explored-dim, and unseen-dark terrain
 - Selectable villagers
-- Command-driven wood gathering
+- Command-driven wood, food, and stone gathering
 - Command-driven construction of one building type
-- Shared wood stockpile
+- Starting town-center base with single-slot villager production
+- Shared wood, food, and stone stockpiles
 - Rust-authoritative fixed-timestep simulation
 - Typed WebSocket commands and snapshots
 - SQLite save/load
@@ -59,9 +60,11 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 
 ## Controls
 
-- **Select:** tap/click a villager.
-- **Gather:** with a villager selected, tap/click a tree. Harvested trees remain visible as depleted stumps and cannot receive new gather orders.
+- **Select:** tap/click a villager or town center.
+- **Move:** with a villager selected, tap/click empty ground.
+- **Gather:** with a villager selected, tap/click a tree, berry bush, or stone deposit. Depleted resources remain visible and cannot receive new gather orders.
 - **Build:** select a villager, press the build button, then tap/click valid ground.
+- **Produce:** select a town center and press **Villager**. It reserves 50 food and produces one villager over six seconds; each building has one active production slot.
 - **Pan:** drag with one pointer.
 - **Zoom:** pinch or use the mouse wheel.
 - **Recover view:** reload to center the camera on the currently visible villagers.
@@ -70,6 +73,8 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 
 Mouse and touch use the same command semantics.
 
+Schema version 3 introduces typed resources, bases, and production. Older persisted worlds are intentionally reset to the deterministic starting state because their tree-only snapshots cannot represent the new model safely.
+
 ## Development checks
 
 ```bash
@@ -77,6 +82,9 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 node --check frontend/app.js
+node scripts/check_directional_walk.cjs
+python3 -m py_compile modal_app.py scripts/modal_manage.py
+python3 scripts/check_depleted_asset.py
 ```
 
 Before shipping structural changes, apply [docs/THERMONUCLEAR_REVIEW.md](docs/THERMONUCLEAR_REVIEW.md).
@@ -84,10 +92,12 @@ Before shipping structural changes, apply [docs/THERMONUCLEAR_REVIEW.md](docs/TH
 ## Deploy to Modal
 
 ```bash
-modal deploy modal_app.py
+python3 scripts/modal_manage.py deploy
 ```
 
-The production demo is deployed from `master` after local tests and browser verification pass.
+Useful management commands are `status`, `history`, `logs`, `rollover`, and `verify`. Stopping production requires the explicit `stop --confirm age-of-agents` safeguard.
+
+Every push to `master` runs the same checks in GitHub Actions, deploys through Modal, and verifies that the production HTML, JavaScript, directional sprites, world shape, and unseen-terrain privacy match the committed checkout.
 
 ## Art direction
 
