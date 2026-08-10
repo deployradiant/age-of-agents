@@ -64,7 +64,7 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 - **Move:** with a villager selected, tap/click empty ground.
 - **Gather:** with a villager selected, tap/click a tree, berry bush, or stone deposit. Depleted resources remain visible and cannot receive new gather orders.
 - **Build:** select a villager, press the build button, then tap/click valid ground.
-- **Produce:** select a town center and press **Villager**. It reserves 50 food and produces one villager over six seconds; each building has one active production slot.
+- **Produce:** select a town center and press **Train Villager** in its anchored capability popover. It reserves 50 food and produces one villager over six seconds; each building has one active production slot.
 - **Pan:** drag with one pointer.
 - **Zoom:** pinch or use the mouse wheel.
 - **Recover view:** reload to center the camera on the currently visible villagers.
@@ -83,6 +83,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 node --check frontend/app.js
 node scripts/check_directional_walk.cjs
+node scripts/check_building_popover.cjs
 python3 -m py_compile modal_app.py scripts/modal_manage.py
 python3 scripts/check_depleted_asset.py
 ```

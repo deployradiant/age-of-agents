@@ -7,6 +7,13 @@ const foodValue = document.querySelector('#food strong');
 const stoneValue = document.querySelector('#stone strong');
 const connection = document.getElementById('connection');
 const selection = document.getElementById('selection');
+const buildingPopover = document.getElementById('building-popover');
+const buildingPopoverTitle = document.getElementById('building-popover-title');
+const buildingProducts = document.getElementById('building-products');
+const buildingJob = document.getElementById('building-job');
+const buildingJobLabel = document.getElementById('building-job-label');
+const buildingProgress = document.getElementById('building-progress');
+const buildingResearches = document.getElementById('building-researches');
 const buildButton = document.getElementById('build');
 const trainButton = document.getElementById('train-villager');
 const cancelButton = document.getElementById('cancel');
@@ -107,6 +114,11 @@ function project(x, y) {
   };
 }
 
+function buildingPopoverAnchor(building, projectWorld, zoom) {
+  const ground = projectWorld(Number(building.x) || 0, Number(building.y) || 0);
+  return { x: ground.x, y: ground.y - 132 * Math.max(0, Number(zoom) || 0) };
+}
+
 function screenToRaw(x, y) {
   return {
     x: camera.x + (x - cssWidth / 2) / camera.zoom,
@@ -167,6 +179,7 @@ function resize() {
   }
   if (!cameraReady) centerCamera();
   else clampCamera();
+  positionBuildingPopover();
 }
 
 function diamondPath(x, y, size) {
@@ -440,6 +453,7 @@ function render(now) {
     return depth(a) - depth(b);
   });
   entities.forEach(item => drawEntity(item, now));
+  positionBuildingPopover();
   if (mousePosition) updateCursor(mousePosition.x, mousePosition.y);
 }
 
@@ -454,8 +468,79 @@ function selectedUnit() {
   return world.units.find(unit => unit.id === selectedUnitId) || null;
 }
 
+function resolveSelectedBuilding(buildings, selectedId, visibilityAt) {
+  const building = buildings.find(item => item.id === selectedId) || null;
+  if (!building || visibilityAt(Number(building.x) || 0, Number(building.y) || 0) !== 'visible') return null;
+  return building;
+}
+
 function selectedBuilding() {
-  return world.buildings.find(building => building.id === selectedBuildingId) || null;
+  return resolveSelectedBuilding(world.buildings, selectedBuildingId, visibilityAtWorldPosition);
+}
+
+function capabilityId(value) {
+  if (typeof value === 'string') return value;
+  return value?.id || value?.kind || value?.product || value?.technology || '';
+}
+
+function buildingCapabilityView(building) {
+  const list = value => Array.isArray(value) ? value.map(capabilityId).filter(Boolean) : [];
+  const products = list(building?.produces);
+  const researches = list(building?.researches);
+  const researched = list(building?.researched_technologies);
+  const rawJob = building?.job || building?.active_job || building?.production || null;
+  if (!rawJob) return { products, researches, researched, job: null };
+  const product = capabilityId(rawJob.product);
+  const technology = capabilityId(rawJob.technology);
+  const type = rawJob.type || rawJob.kind || (technology ? 'research' : 'produce');
+  const subject = product || technology || capabilityId(rawJob.item ?? rawJob.target) || 'task';
+  const duration = Math.max(0, Number(rawJob.required_seconds ?? rawJob.duration_seconds ?? rawJob.total_seconds) || (subject === 'villager' ? 6 : 0));
+  const elapsed = Math.max(0, Number(rawJob.elapsed_seconds ?? rawJob.elapsed ?? rawJob.progress_seconds) || 0);
+  const explicit = rawJob.progress == null ? NaN : Number(rawJob.progress);
+  const fraction = Number.isFinite(explicit) ? (explicit > 1 ? explicit / 100 : explicit) : (duration > 0 ? elapsed / duration : 0);
+  return { products, researches, researched, job: { type, subject, progress: Math.max(0, Math.min(1, fraction)) } };
+}
+
+function capabilityLabel(value) {
+  return String(value || 'task').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function positionBuildingPopover() {
+  const building = selectedBuilding();
+  if (!building) {
+    buildingPopover.hidden = true;
+    return;
+  }
+  if (buildingPopover.hidden) return;
+  const anchor = buildingPopoverAnchor(building, project, camera.zoom);
+  buildingPopover.style.left = `${anchor.x}px`;
+  buildingPopover.style.top = `${anchor.y}px`;
+}
+
+function updateBuildingPopover(building) {
+  buildingPopover.hidden = !building;
+  if (!building) return;
+  const view = buildingCapabilityView(building);
+  const job = view.job;
+  buildingPopoverTitle.textContent = building.kind === 'town_center' ? 'Town Center' : capabilityLabel(building.kind);
+  buildingProducts.textContent = `Produces: ${view.products.map(capabilityLabel).join(', ') || 'Nothing'}`;
+  buildingJob.hidden = !job;
+  if (job) {
+    const verb = String(job.type).includes('research') ? 'Researching' : 'Producing';
+    const percent = Math.floor(job.progress * 100);
+    buildingJobLabel.textContent = `${verb} ${capabilityLabel(job.subject)} · ${percent}%`;
+    buildingProgress.value = job.progress;
+    buildingProgress.setAttribute('aria-label', `${verb} ${capabilityLabel(job.subject)} progress`);
+  }
+  const researchText = [];
+  if (view.researches.length) researchText.push(`Researches: ${view.researches.map(capabilityLabel).join(', ')}`);
+  if (view.researched.length) researchText.push(`Researched: ${view.researched.map(capabilityLabel).join(', ')}`);
+  buildingResearches.hidden = researchText.length === 0;
+  buildingResearches.textContent = researchText.join(' · ');
+  trainButton.hidden = !view.products.includes('villager');
+  trainButton.disabled = Boolean(job) || world.food < 50;
+  trainButton.title = job ? 'Town center is already busy' : world.food < 50 ? 'Train villager (50 food required)' : 'Train villager (50 food)';
+  positionBuildingPopover();
 }
 
 function updateHud() {
@@ -467,18 +552,7 @@ function updateHud() {
   if (!unit) selectedUnitId = null;
   if (!building) selectedBuildingId = null;
   buildButton.disabled = !unit;
-  const canTrainVillager = Boolean(
-    building
-    && building.produces?.includes('villager')
-    && !building.production
-    && world.food >= 50
-  );
-  trainButton.disabled = !canTrainVillager;
-  trainButton.title = building?.production
-    ? 'Town center is already producing'
-    : world.food < 50
-      ? 'Train villager (50 food required)'
-      : 'Train villager (50 food)';
+  updateBuildingPopover(building);
 
   if (unit) {
     selection.className = '';
@@ -498,12 +572,7 @@ function updateHud() {
     const name = document.createElement('strong');
     name.textContent = building.kind === 'town_center' ? 'Town Center' : building.id;
     const status = document.createElement('span');
-    if (building.production) {
-      const progress = Math.min(100, Math.floor(Number(building.production.elapsed_seconds) / 6 * 100));
-      status.textContent = `Producing villager · ${progress}%`;
-    } else {
-      status.textContent = 'Ready · produces villagers';
-    }
+    status.textContent = 'Capabilities shown above building';
     selection.append(name, status);
     return;
   }
@@ -566,6 +635,11 @@ function handleTap(x, y) {
     return;
   }
   if (!hit) {
+    if (selectedBuildingId) {
+      selectedBuildingId = null;
+      updateHud();
+      return;
+    }
     const unit = selectedUnit();
     if (!unit) return;
     const ground = screenToWorld(x, y);
@@ -819,6 +893,7 @@ async function resetWorld() {
     selectedUnitId = null;
     selectedBuildingId = null;
     cancelBuild();
+    updateHud();
     showToast('World reset');
   } catch (error) {
     showToast(error instanceof Error ? error.message : 'World reset failed');

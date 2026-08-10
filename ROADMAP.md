@@ -54,7 +54,7 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - Build image button enters placement mode; tap/click ground to build.
 - Drag pans; wheel/pinch zooms.
 - Touch targets are at least 48×48 CSS pixels and respect mobile safe areas.
-- Thin top resource row, selected-unit status, and bottom command dock only.
+- Thin top resource row, selected-unit status, bottom command dock, and an anchored selected-building capability popover.
 - No minimap, event chronicle, full agent list, or desktop-only controls.
 
 ### Asset contract
