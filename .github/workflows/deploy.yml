@@ -29,6 +29,7 @@ jobs:
         run: |
           node --check frontend/app.js
           node scripts/check_directional_walk.cjs
+          node scripts/check_building_popover.cjs
           python3 -m py_compile modal_app.py scripts/modal_manage.py
           python3 scripts/check_depleted_asset.py
 

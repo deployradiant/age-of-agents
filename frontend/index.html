@@ -42,6 +42,28 @@
     #selection strong { display: block; color: #f4d98d; font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
     #selection span { display: block; margin-top: 2px; color: #b9b29b; font-size: 11px; text-transform: capitalize; }
     #selection.empty { color: #a9a28c; font-size: 12px; }
+    #building-popover {
+      position: fixed; z-index: 4; width: min(230px, calc(100vw - 20px)); padding: 9px;
+      transform: translate(-50%, -100%); border: 1px solid #9a7d43; border-radius: 8px;
+      background: #171b12f2; box-shadow: 0 5px 18px #000b; pointer-events: none;
+    }
+    #building-popover[hidden], #building-job[hidden], #building-researches[hidden], #train-villager[hidden] { display: none; }
+    #building-popover-title { display: block; color: #f4d98d; font-size: 14px; }
+    #building-products, #building-researches { display: block; margin-top: 3px; color: #c7bfa6; font-size: 11px; }
+    #building-job { margin-top: 7px; }
+    #building-job-label { display: block; color: #eee0b8; font-size: 11px; }
+    #building-progress { display: block; width: 100%; height: 8px; margin-top: 4px; accent-color: #e8bd51; }
+    #train-villager {
+      width: 100%; min-height: 44px; margin-top: 8px; padding: 4px 8px; display: flex;
+      align-items: center; gap: 8px; border: 1px solid #8e7746; border-radius: 6px;
+      background: #292918; cursor: pointer; touch-action: manipulation; pointer-events: auto;
+    }
+    #train-villager img { width: 34px; height: 34px; object-fit: cover; border-radius: 4px; }
+    #train-villager span { text-align: left; font-size: 12px; }
+    #train-villager small { display: block; color: #c6ad71; font-size: 10px; }
+    #train-villager:active { transform: translateY(1px); border-color: #f1c557; }
+    #train-villager:focus-visible { outline: 2px solid #ffe08a; outline-offset: 2px; }
+    #train-villager:disabled { filter: grayscale(1); opacity: .5; cursor: default; }
     #placement {
       position: fixed; z-index: 4; top: calc(43px + env(safe-area-inset-top)); left: 50%;
       transform: translateX(-50%); display: none; white-space: nowrap; padding: 7px 11px;
@@ -96,12 +118,18 @@
   <main id="game" aria-label="Isometric game world"><canvas id="world"></canvas></main>
   <header id="resources"><span id="stockpiles"><span id="wood">Wood <strong>0</strong></span><span id="food">Food <strong>0</strong></span><span id="stone">Stone <strong>0</strong></span></span><span id="top-actions"><button id="reset-world" type="button">Reset world</button><span id="connection">Connecting</span></span></header>
   <aside id="selection" class="empty">Tap a villager or town center</aside>
+  <section id="building-popover" role="region" aria-labelledby="building-popover-title" hidden>
+    <strong id="building-popover-title">Town Center</strong>
+    <span id="building-products"></span>
+    <div id="building-job" hidden><span id="building-job-label"></span><progress id="building-progress" max="1" value="0"></progress></div>
+    <span id="building-researches" hidden></span>
+    <button id="train-villager" type="button" aria-label="Train villager for 50 food"><img src="/assets/game/agent_idle.png" alt=""><span>Train Villager<small>50 food</small></span></button>
+  </section>
   <div id="placement">Tap ground to build · Escape to cancel</div>
   <div id="toast" role="status" aria-live="polite"></div>
   <details id="laptop-help"><summary>Keyboard &amp; mouse</summary><p>Select a villager, then click ground to move or a resource to gather · Select the town center to train villagers · WASD or arrows pan · Wheel zooms · B builds · Escape cancels</p></details>
   <nav id="dock" aria-label="Commands">
     <button id="build" class="command" disabled aria-label="Build town center" title="Build town center"><img src="/assets/game/command_build.png" alt=""><span>Build</span></button>
-    <button id="train-villager" class="command" disabled aria-label="Train villager for 50 food" title="Train villager (50 food)"><img src="/assets/game/agent_idle.png" alt=""><span>Villager</span></button>
     <button id="cancel" class="command" aria-label="Cancel placement" title="Cancel placement"><img src="/assets/game/command_cancel.png" alt=""><span>Cancel</span></button>
   </nav>
   <script src="/frontend/app.js"></script>
