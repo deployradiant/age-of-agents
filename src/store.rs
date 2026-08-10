@@ -43,11 +43,11 @@ impl Store {
                 .any(|column| column == "saved_at")
         };
         let transaction = connection.transaction()?;
-        if legacy_schema || schema_version < 3 {
+        if legacy_schema || schema_version < 4 {
             // The pre-milestone prototype stored a fundamentally different world
-            // model; version 1 predates fog, and version 2 has tree-only resources
-            // with no base or production state. These snapshots cannot be translated
-            // safely into the current deterministic world.
+            // model; versions through 3 predate typed cargo, building jobs,
+            // technologies, and the seven-resource stockpile. Those snapshots cannot
+            // be translated safely into the current deterministic world.
             transaction.execute_batch("DROP TABLE IF EXISTS world_state;")?;
         }
         transaction.execute_batch(
@@ -55,7 +55,7 @@ impl Store {
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 world_json TEXT NOT NULL
             );
-            PRAGMA user_version = 3;",
+            PRAGMA user_version = 4;",
         )?;
         transaction.commit()?;
         Ok(())
@@ -217,6 +217,28 @@ mod tests {
                 );
                 INSERT INTO world_state VALUES (1, '{\"width\":1200,\"height\":800}');
                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = Store::from_path(&path);
+        store.initialize().unwrap();
+        assert_eq!(store.load().unwrap(), None);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn version_three_world_is_migrated_before_deserialization() {
+        let path = temporary_db("version-three");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE world_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    world_json TEXT NOT NULL
+                );
+                INSERT INTO world_state VALUES (1, '{\"width\":2400,\"height\":1600}');
+                PRAGMA user_version = 3;",
             )
             .unwrap();
         drop(connection);

@@ -13,6 +13,12 @@ pub const TOWN_CENTER_WOOD_COST: f64 = 20.0;
 pub const BUILD_SECONDS: f64 = 4.0;
 pub const VILLAGER_FOOD_COST: f64 = 50.0;
 pub const VILLAGER_PRODUCTION_SECONDS: f64 = 6.0;
+pub const RESEARCH_FOOD_COST: f64 = 40.0;
+pub const RESEARCH_WOOD_COST: f64 = 20.0;
+pub const RESEARCH_SECONDS: f64 = 8.0;
+pub const GATHERING_TECH_MULTIPLIER: f64 = 1.2;
+pub const RESOURCE_MIN_SEPARATION: f64 = 120.0;
+pub const STARTING_BASE_RESOURCE_CLEARANCE: f64 = 200.0;
 const MOVE_SPEED: f64 = 120.0;
 const GATHER_RATE: f64 = 10.0;
 pub const VILLAGER_CARRY_CAPACITY: f64 = 20.0;
@@ -140,6 +146,10 @@ pub enum ResourceKind {
     Wood,
     Food,
     Stone,
+    Gold,
+    Iron,
+    Clay,
+    Fiber,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,7 +158,8 @@ pub struct Building {
     pub kind: BuildingKind,
     pub position: Position,
     pub produces: Vec<ProductKind>,
-    pub production: Option<ProductionJob>,
+    pub researches: Vec<TechnologyKind>,
+    pub job: Option<BuildingJob>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,9 +175,55 @@ pub enum ProductKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ProductionJob {
-    pub product: ProductKind,
-    pub elapsed_seconds: f64,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BuildingJob {
+    Produce {
+        product: ProductKind,
+        elapsed_seconds: f64,
+    },
+    Research {
+        technology: TechnologyKind,
+        elapsed_seconds: f64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TechnologyKind {
+    Forestry,
+    Agriculture,
+    Masonry,
+    Mining,
+    Textiles,
+}
+
+impl TechnologyKind {
+    const ALL: [Self; 5] = [
+        Self::Forestry,
+        Self::Agriculture,
+        Self::Masonry,
+        Self::Mining,
+        Self::Textiles,
+    ];
+
+    fn prerequisite(self) -> Option<Self> {
+        match self {
+            Self::Mining => Some(Self::Masonry),
+            Self::Textiles => Some(Self::Agriculture),
+            Self::Forestry | Self::Agriculture | Self::Masonry => None,
+        }
+    }
+
+    fn improves(self, resource: ResourceKind) -> bool {
+        matches!(
+            (self, resource),
+            (Self::Forestry, ResourceKind::Wood)
+                | (Self::Agriculture, ResourceKind::Food)
+                | (Self::Masonry, ResourceKind::Stone | ResourceKind::Clay)
+                | (Self::Mining, ResourceKind::Gold | ResourceKind::Iron)
+                | (Self::Textiles, ResourceKind::Fiber)
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,6 +231,24 @@ pub struct Stockpile {
     pub wood: f64,
     pub food: f64,
     pub stone: f64,
+    pub gold: f64,
+    pub iron: f64,
+    pub clay: f64,
+    pub fiber: f64,
+}
+
+impl Stockpile {
+    fn add(&mut self, kind: ResourceKind, amount: f64) {
+        match kind {
+            ResourceKind::Wood => self.wood += amount,
+            ResourceKind::Food => self.food += amount,
+            ResourceKind::Stone => self.stone += amount,
+            ResourceKind::Gold => self.gold += amount,
+            ResourceKind::Iron => self.iron += amount,
+            ResourceKind::Clay => self.clay += amount,
+            ResourceKind::Fiber => self.fiber += amount,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -188,6 +263,7 @@ pub struct GameWorld {
     pub resources: Vec<ResourceNode>,
     pub buildings: Vec<Building>,
     pub stockpile: Stockpile,
+    pub researched_technologies: Vec<TechnologyKind>,
     next_building_id: u64,
     next_unit_id: u64,
 }
@@ -203,6 +279,7 @@ pub struct WorldSnapshot {
     pub resources: Vec<ResourceNode>,
     pub buildings: Vec<Building>,
     pub stockpile: Stockpile,
+    pub researched_technologies: Vec<TechnologyKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -226,6 +303,10 @@ pub enum Command {
         building_id: String,
         product: ProductKind,
     },
+    Research {
+        building_id: String,
+        technology: TechnologyKind,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,6 +322,10 @@ pub enum CommandError {
     BuildingBusy,
     ProductUnavailable,
     InsufficientFood,
+    TechnologyUnavailable,
+    TechnologyAlreadyResearched,
+    MissingTechnologyPrerequisite,
+    InsufficientResearchResources,
 }
 
 impl std::fmt::Display for CommandError {
@@ -257,6 +342,10 @@ impl std::fmt::Display for CommandError {
             Self::BuildingBusy => "building is already producing",
             Self::ProductUnavailable => "building cannot produce that item",
             Self::InsufficientFood => "insufficient food",
+            Self::TechnologyUnavailable => "building cannot research that technology",
+            Self::TechnologyAlreadyResearched => "technology is already researched",
+            Self::MissingTechnologyPrerequisite => "technology prerequisite is not researched",
+            Self::InsufficientResearchResources => "research requires 40 food and 20 wood",
         };
         f.write_str(message)
     }
@@ -264,12 +353,13 @@ impl std::fmt::Display for CommandError {
 
 impl Default for GameWorld {
     fn default() -> Self {
+        let terrain = generate_terrain();
         let mut world = Self {
             width: WORLD_WIDTH,
             height: WORLD_HEIGHT,
             cell_size: CELL_SIZE,
             tick: 0,
-            terrain: generate_terrain(),
+            terrain: terrain.clone(),
             explored_cells: Vec::new(),
             units: vec![
                 Unit {
@@ -291,42 +381,23 @@ impl Default for GameWorld {
                     cargo: None,
                 },
             ],
-            resources: vec![
-                resource("tree-1", ResourceKind::Wood, 1360.0, 640.0, 25.0),
-                resource("tree-2", ResourceKind::Wood, 1520.0, 800.0, 25.0),
-                resource("tree-3", ResourceKind::Wood, 1320.0, 1040.0, 25.0),
-                resource("tree-4", ResourceKind::Wood, 880.0, 1040.0, 25.0),
-                resource("tree-5", ResourceKind::Wood, 760.0, 720.0, 25.0),
-                resource("tree-6", ResourceKind::Wood, 1680.0, 1040.0, 25.0),
-                resource("berries-1", ResourceKind::Food, 960.0, 640.0, 50.0),
-                resource("berries-2", ResourceKind::Food, 1040.0, 1120.0, 50.0),
-                resource("berries-3", ResourceKind::Food, 1440.0, 1120.0, 50.0),
-                resource("berries-4", ResourceKind::Food, 720.0, 1200.0, 50.0),
-                resource("stone-1", ResourceKind::Stone, 840.0, 800.0, 40.0),
-                resource("stone-2", ResourceKind::Stone, 1600.0, 640.0, 40.0),
-                resource("stone-3", ResourceKind::Stone, 1520.0, 1200.0, 40.0),
-                resource("stone-4", ResourceKind::Stone, 640.0, 880.0, 40.0),
-            ],
+            resources: generate_resources(&terrain),
             buildings: vec![town_center("base-1", 1160.0, 720.0)],
             stockpile: Stockpile {
                 wood: 0.0,
                 food: 0.0,
                 stone: 0.0,
+                gold: 0.0,
+                iron: 0.0,
+                clay: 0.0,
+                fiber: 0.0,
             },
+            researched_technologies: Vec::new(),
             next_building_id: 2,
             next_unit_id: 3,
         };
         world.refresh_exploration();
         world
-    }
-}
-
-fn resource(id: &str, kind: ResourceKind, x: f64, y: f64, amount: f64) -> ResourceNode {
-    ResourceNode {
-        id: id.into(),
-        kind,
-        position: Position { x, y },
-        amount,
     }
 }
 
@@ -336,7 +407,8 @@ fn town_center(id: &str, x: f64, y: f64) -> Building {
         kind: BuildingKind::TownCenter,
         position: Position { x, y },
         produces: vec![ProductKind::Villager],
-        production: None,
+        researches: TechnologyKind::ALL.to_vec(),
+        job: None,
     }
 }
 
@@ -371,6 +443,69 @@ fn generate_terrain() -> Vec<TerrainCell> {
         }
     }
     terrain
+}
+
+fn compatible_biomes(kind: ResourceKind) -> &'static [TerrainBiome] {
+    match kind {
+        ResourceKind::Wood => &[TerrainBiome::Forest, TerrainBiome::Heath],
+        ResourceKind::Food => &[TerrainBiome::Meadow, TerrainBiome::Prairie],
+        ResourceKind::Stone => &[TerrainBiome::Highland, TerrainBiome::Scrubland],
+        ResourceKind::Gold => &[TerrainBiome::Highland],
+        ResourceKind::Iron => &[TerrainBiome::Highland, TerrainBiome::Scrubland],
+        ResourceKind::Clay => &[TerrainBiome::Clayland, TerrainBiome::Wetland],
+        ResourceKind::Fiber => &[TerrainBiome::Wetland, TerrainBiome::Prairie],
+    }
+}
+
+fn generate_resources(terrain: &[TerrainCell]) -> Vec<ResourceNode> {
+    const SPECS: [(ResourceKind, &str, usize, f64); 7] = [
+        (ResourceKind::Wood, "tree", 6, 25.0),
+        (ResourceKind::Food, "berries", 4, 50.0),
+        (ResourceKind::Stone, "stone", 4, 40.0),
+        (ResourceKind::Gold, "gold", 2, 35.0),
+        (ResourceKind::Iron, "iron", 2, 40.0),
+        (ResourceKind::Clay, "clay", 2, 45.0),
+        (ResourceKind::Fiber, "fiber", 2, 50.0),
+    ];
+
+    let mut resources: Vec<ResourceNode> = Vec::new();
+    for (kind, prefix, count, amount) in SPECS {
+        for number in 1..=count {
+            let cell = terrain
+                .iter()
+                .filter(|cell| compatible_biomes(kind).contains(&cell.biome))
+                .filter(|cell| {
+                    let position = Position {
+                        x: (f64::from(cell.column) + 0.5) * CELL_SIZE,
+                        y: (f64::from(cell.row) + 0.5) * CELL_SIZE,
+                    };
+                    position.distance(Position {
+                        x: 1200.0,
+                        y: 800.0,
+                    }) >= STARTING_BASE_RESOURCE_CLEARANCE
+                        && resources.iter().all(|resource| {
+                            resource.position.distance(position) + f64::EPSILON
+                                >= RESOURCE_MIN_SEPARATION
+                        })
+                })
+                .min_by_key(|cell| {
+                    let dx = i32::from(cell.column) - i32::from(WORLD_COLUMNS / 2);
+                    let dy = i32::from(cell.row) - i32::from(WORLD_ROWS / 2);
+                    (dx * dx + dy * dy, cell.row, cell.column)
+                })
+                .expect("fixed terrain has enough separated biome-compatible resource cells");
+            resources.push(ResourceNode {
+                id: format!("{prefix}-{number}"),
+                kind,
+                position: Position {
+                    x: (f64::from(cell.column) + 0.5) * CELL_SIZE,
+                    y: (f64::from(cell.row) + 0.5) * CELL_SIZE,
+                },
+                amount,
+            });
+        }
+    }
+    resources
 }
 
 impl GameWorld {
@@ -423,17 +558,9 @@ impl GameWorld {
                 building_id,
                 product,
             } => {
-                let building_index = self
-                    .buildings
-                    .iter()
-                    .position(|building| building.id == building_id)
-                    .ok_or(CommandError::BuildingNotFound)?;
-                let building = &self.buildings[building_index];
-                if !building.produces.contains(&product) {
+                let building_index = self.building_index_and_idle(&building_id)?;
+                if !self.buildings[building_index].produces.contains(&product) {
                     return Err(CommandError::ProductUnavailable);
-                }
-                if building.production.is_some() {
-                    return Err(CommandError::BuildingBusy);
                 }
                 match product {
                     ProductKind::Villager if self.stockpile.food < VILLAGER_FOOD_COST => {
@@ -441,13 +568,58 @@ impl GameWorld {
                     }
                     ProductKind::Villager => self.stockpile.food -= VILLAGER_FOOD_COST,
                 }
-                self.buildings[building_index].production = Some(ProductionJob {
+                self.buildings[building_index].job = Some(BuildingJob::Produce {
                     product,
                     elapsed_seconds: 0.0,
                 });
                 Ok(())
             }
+            Command::Research {
+                building_id,
+                technology,
+            } => {
+                let building_index = self.building_index_and_idle(&building_id)?;
+                if !self.buildings[building_index]
+                    .researches
+                    .contains(&technology)
+                {
+                    return Err(CommandError::TechnologyUnavailable);
+                }
+                if self.researched_technologies.contains(&technology) {
+                    return Err(CommandError::TechnologyAlreadyResearched);
+                }
+                if technology
+                    .prerequisite()
+                    .is_some_and(|required| !self.researched_technologies.contains(&required))
+                {
+                    return Err(CommandError::MissingTechnologyPrerequisite);
+                }
+                if self.stockpile.food < RESEARCH_FOOD_COST
+                    || self.stockpile.wood < RESEARCH_WOOD_COST
+                {
+                    return Err(CommandError::InsufficientResearchResources);
+                }
+                self.stockpile.food -= RESEARCH_FOOD_COST;
+                self.stockpile.wood -= RESEARCH_WOOD_COST;
+                self.buildings[building_index].job = Some(BuildingJob::Research {
+                    technology,
+                    elapsed_seconds: 0.0,
+                });
+                Ok(())
+            }
         }
+    }
+
+    fn building_index_and_idle(&self, building_id: &str) -> Result<usize, CommandError> {
+        let index = self
+            .buildings
+            .iter()
+            .position(|building| building.id == building_id)
+            .ok_or(CommandError::BuildingNotFound)?;
+        if self.buildings[index].job.is_some() {
+            return Err(CommandError::BuildingBusy);
+        }
+        Ok(index)
     }
 
     fn unit_index_and_idle(&self, unit_id: &str) -> Result<usize, CommandError> {
@@ -487,7 +659,7 @@ impl GameWorld {
             }
         }
         for index in 0..self.buildings.len() {
-            self.tick_production(index, dt);
+            self.tick_building_job(index, dt);
         }
         self.refresh_exploration();
     }
@@ -548,6 +720,7 @@ impl GameWorld {
                 .cloned()
                 .collect(),
             stockpile: self.stockpile.clone(),
+            researched_technologies: self.researched_technologies.clone(),
         }
     }
 
@@ -676,7 +849,7 @@ impl GameWorld {
             .as_ref()
             .map_or(0.0, |cargo| cargo.amount);
         let capacity_left = (VILLAGER_CARRY_CAPACITY - carried).max(0.0);
-        let gathered = (GATHER_RATE * dt)
+        let gathered = (GATHER_RATE * self.gather_multiplier(kind) * dt)
             .min(self.resources[resource_index].amount)
             .min(capacity_left);
         self.resources[resource_index].amount -= gathered;
@@ -686,6 +859,7 @@ impl GameWorld {
                 .get_or_insert(CarriedResource { kind, amount: 0.0 });
             cargo.amount += gathered;
         }
+
         if self.resources[resource_index].amount <= f64::EPSILON {
             self.resources[resource_index].amount = 0.0;
         }
@@ -722,11 +896,7 @@ impl GameWorld {
             return;
         }
         if let Some(cargo) = self.units[unit_index].cargo.take() {
-            match cargo.kind {
-                ResourceKind::Wood => self.stockpile.wood += cargo.amount,
-                ResourceKind::Food => self.stockpile.food += cargo.amount,
-                ResourceKind::Stone => self.stockpile.stone += cargo.amount,
-            }
+            self.stockpile.add(cargo.kind, cargo.amount);
         }
         self.resume_or_finish_gather(unit_index, resource_id);
     }
@@ -768,6 +938,17 @@ impl GameWorld {
             .map(|building| building.position)
     }
 
+    fn gather_multiplier(&self, resource: ResourceKind) -> f64 {
+        if self
+            .researched_technologies
+            .iter()
+            .any(|technology| technology.improves(resource))
+        {
+            GATHERING_TECH_MULTIPLIER
+        } else {
+            1.0
+        }
+    }
     fn tick_build(&mut self, unit_index: usize, target: Position, work_seconds: f64, dt: f64) {
         let remaining = move_toward(&mut self.units[unit_index].position, target, dt);
         let completed_work = work_seconds + remaining;
@@ -787,35 +968,56 @@ impl GameWorld {
         self.units[unit_index].action = UnitAction::Idle;
     }
 
-    fn tick_production(&mut self, building_index: usize, dt: f64) {
-        let Some(mut job) = self.buildings[building_index].production.clone() else {
+    fn tick_building_job(&mut self, building_index: usize, dt: f64) {
+        let Some(job) = self.buildings[building_index].job.clone() else {
             return;
         };
-        job.elapsed_seconds += dt;
-        let required_seconds = match job.product {
-            ProductKind::Villager => VILLAGER_PRODUCTION_SECONDS,
-        };
-        if job.elapsed_seconds + f64::EPSILON < required_seconds {
-            self.buildings[building_index].production = Some(job);
-            return;
-        }
-
-        let building_position = self.buildings[building_index].position;
-        match job.product {
-            ProductKind::Villager => {
-                self.units.push(Unit {
-                    id: format!("villager-{}", self.next_unit_id),
-                    position: Position {
-                        x: (building_position.x + 100.0).min(self.width),
-                        y: (building_position.y + 80.0).min(self.height),
-                    },
-                    action: UnitAction::Idle,
-                    cargo: None,
-                });
-                self.next_unit_id += 1;
+        match job {
+            BuildingJob::Produce {
+                product,
+                mut elapsed_seconds,
+            } => {
+                elapsed_seconds += dt;
+                if elapsed_seconds + f64::EPSILON < VILLAGER_PRODUCTION_SECONDS {
+                    self.buildings[building_index].job = Some(BuildingJob::Produce {
+                        product,
+                        elapsed_seconds,
+                    });
+                    return;
+                }
+                let position = self.buildings[building_index].position;
+                match product {
+                    ProductKind::Villager => {
+                        self.units.push(Unit {
+                            id: format!("villager-{}", self.next_unit_id),
+                            position: Position {
+                                x: (position.x + 100.0).min(self.width),
+                                y: (position.y + 80.0).min(self.height),
+                            },
+                            action: UnitAction::Idle,
+                            cargo: None,
+                        });
+                        self.next_unit_id += 1;
+                    }
+                }
+            }
+            BuildingJob::Research {
+                technology,
+                mut elapsed_seconds,
+            } => {
+                elapsed_seconds += dt;
+                if elapsed_seconds + f64::EPSILON < RESEARCH_SECONDS {
+                    self.buildings[building_index].job = Some(BuildingJob::Research {
+                        technology,
+                        elapsed_seconds,
+                    });
+                    return;
+                }
+                self.researched_technologies.push(technology);
+                self.researched_technologies.sort_unstable();
             }
         }
-        self.buildings[building_index].production = None;
+        self.buildings[building_index].job = None;
     }
 }
 

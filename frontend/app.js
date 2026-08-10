@@ -5,6 +5,10 @@ const ctx = canvas.getContext('2d', { alpha: false });
 const woodValue = document.querySelector('#wood strong');
 const foodValue = document.querySelector('#food strong');
 const stoneValue = document.querySelector('#stone strong');
+const goldValue = document.querySelector('#gold strong');
+const ironValue = document.querySelector('#iron strong');
+const clayValue = document.querySelector('#clay strong');
+const fiberValue = document.querySelector('#fiber strong');
 const connection = document.getElementById('connection');
 const selection = document.getElementById('selection');
 const buildingPopover = document.getElementById('building-popover');
@@ -14,6 +18,7 @@ const buildingJob = document.getElementById('building-job');
 const buildingJobLabel = document.getElementById('building-job-label');
 const buildingProgress = document.getElementById('building-progress');
 const buildingResearches = document.getElementById('building-researches');
+const researchActions = document.getElementById('research-actions');
 const buildButton = document.getElementById('build');
 const trainButton = document.getElementById('train-villager');
 const cancelButton = document.getElementById('cancel');
@@ -48,7 +53,7 @@ let reconnectAttempt = 0;
 let requestSequence = 0;
 let lastSnapshotSequence = 0;
 let minimumSnapshotSequence = 0;
-let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, food: 0, stone: 0, terrain: [], units: [], resources: [], buildings: [] };
+let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, food: 0, stone: 0, gold: 0, iron: 0, clay: 0, fiber: 0, terrain: [], units: [], resources: [], buildings: [] };
 let authoritativeWorld = world;
 const snapshotBuffer = window.SnapshotBuffer.createSnapshotBuffer();
 let tick = 0;
@@ -435,8 +440,10 @@ function drawEntity(item, now) {
   }
   ctx.restore();
 
-  if (item.type === 'building' && item.data.production) {
-    const progress = Math.max(0, Math.min(1, Number(item.data.production.elapsed_seconds) / 6));
+  const activeJob = item.type === 'building' ? (item.data.job || item.data.production) : null;
+  if (activeJob) {
+    const duration = activeJob.type === 'research' ? 8 : 6;
+    const progress = Math.max(0, Math.min(1, Number(activeJob.elapsed_seconds) / duration));
     const barWidth = 78 * camera.zoom;
     ctx.fillStyle = '#111b';
     ctx.fillRect(point.x - barWidth / 2, point.y + 15 * camera.zoom, barWidth, 6 * camera.zoom);
@@ -517,7 +524,7 @@ function buildingCapabilityView(building) {
   const technology = capabilityId(rawJob.technology);
   const type = rawJob.type || rawJob.kind || (technology ? 'research' : 'produce');
   const subject = product || technology || capabilityId(rawJob.item ?? rawJob.target) || 'task';
-  const duration = Math.max(0, Number(rawJob.required_seconds ?? rawJob.duration_seconds ?? rawJob.total_seconds) || (subject === 'villager' ? 6 : 0));
+  const duration = Math.max(0, Number(rawJob.required_seconds ?? rawJob.duration_seconds ?? rawJob.total_seconds) || (subject === 'villager' ? 6 : String(type).includes('research') ? 8 : 0));
   const elapsed = Math.max(0, Number(rawJob.elapsed_seconds ?? rawJob.elapsed ?? rawJob.progress_seconds) || 0);
   const explicit = rawJob.progress == null ? NaN : Number(rawJob.progress);
   const fraction = Number.isFinite(explicit) ? (explicit > 1 ? explicit / 100 : explicit) : (duration > 0 ? elapsed / duration : 0);
@@ -560,6 +567,17 @@ function updateBuildingPopover(building) {
   if (view.researched.length) researchText.push(`Researched: ${view.researched.map(capabilityLabel).join(', ')}`);
   buildingResearches.hidden = researchText.length === 0;
   buildingResearches.textContent = researchText.join(' · ');
+  researchActions.replaceChildren();
+  const prerequisites = { mining: 'masonry', textiles: 'agriculture' };
+  for (const technology of view.researches.filter(item => !view.researched.includes(item))) {
+    const button = document.createElement('button');
+    const prerequisite = prerequisites[technology];
+    button.type = 'button';
+    button.dataset.tech = technology;
+    button.textContent = `${capabilityLabel(technology)} · 40 food, 20 wood`;
+    button.disabled = Boolean(job) || world.food < 40 || world.wood < 20 || Boolean(prerequisite && !view.researched.includes(prerequisite));
+    researchActions.append(button);
+  }
   trainButton.hidden = !view.products.includes('villager');
   trainButton.disabled = Boolean(job) || world.food < 50;
   trainButton.title = job ? 'Town center is already busy' : world.food < 50 ? 'Train villager (50 food required)' : 'Train villager (50 food)';
@@ -570,6 +588,10 @@ function updateHud() {
   woodValue.textContent = String(Math.floor(world.wood ?? 0));
   foodValue.textContent = String(Math.floor(world.food ?? 0));
   stoneValue.textContent = String(Math.floor(world.stone ?? 0));
+  goldValue.textContent = String(Math.floor(world.gold ?? 0));
+  ironValue.textContent = String(Math.floor(world.iron ?? 0));
+  clayValue.textContent = String(Math.floor(world.clay ?? 0));
+  fiberValue.textContent = String(Math.floor(world.fiber ?? 0));
   const unit = selectedUnit();
   const building = selectedBuilding();
   if (!unit) selectedUnitId = null;
@@ -583,7 +605,8 @@ function updateHud() {
     const name = document.createElement('strong');
     name.textContent = unit.name || `Villager ${unit.id}`;
     const status = document.createElement('span');
-    status.textContent = `${unit.state || 'idle'} · tick ${tick}`;
+    const cargo = unit.cargo ? ` · carrying ${Math.floor(unit.cargo.amount)}/${20} ${unit.cargo.kind}` : '';
+    status.textContent = `${unit.state || 'idle'}${cargo} · tick ${tick}`;
     selection.append(name, status);
     return;
   }
@@ -879,10 +902,14 @@ function connect() {
           wood: Number(next.stockpile?.wood) || 0,
           food: Number(next.stockpile?.food) || 0,
           stone: Number(next.stockpile?.stone) || 0,
+          gold: Number(next.stockpile?.gold) || 0,
+          iron: Number(next.stockpile?.iron) || 0,
+          clay: Number(next.stockpile?.clay) || 0,
+          fiber: Number(next.stockpile?.fiber) || 0,
           terrain: Array.isArray(next.terrain) ? next.terrain : [],
           units: Array.isArray(next.units) ? next.units.map(unitForDisplay) : [],
           resources: Array.isArray(next.resources) ? next.resources.map(withPosition) : [],
-          buildings: Array.isArray(next.buildings) ? next.buildings.map(withPosition) : []
+          buildings: Array.isArray(next.buildings) ? next.buildings.map(building => ({ ...withPosition(building), researched_technologies: next.researched_technologies || [] })) : []
         };
         snapshotBuffer.push(sequence, normalizedWorld, performance.now());
         authoritativeWorld = normalizedWorld;
@@ -936,6 +963,11 @@ buildButton.addEventListener('click', () => setBuildMode(!buildMode));
 trainButton.addEventListener('click', () => {
   const building = selectedBuilding();
   if (building) sendCommand({ type: 'produce', building_id: building.id, product: 'villager' });
+});
+researchActions.addEventListener('click', event => {
+  const technology = event.target.closest('button[data-tech]')?.dataset.tech;
+  const building = selectedBuilding();
+  if (technology && building) sendCommand({ type: 'research', building_id: building.id, technology });
 });
 cancelButton.addEventListener('click', cancelBuild);
 resetWorldButton.addEventListener('click', resetWorld);

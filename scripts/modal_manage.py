@@ -7,6 +7,8 @@ import argparse
 import json
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -35,7 +37,7 @@ def fetch(path: str, timeout: int = 120) -> bytes:
         return response.read()
 
 
-def verify() -> None:
+def verify_once() -> None:
     comparisons = {
         "/": ROOT / "frontend/index.html",
         "/frontend/app.js": ROOT / "frontend/app.js",
@@ -66,6 +68,20 @@ def verify() -> None:
         f"terrain={len(terrain)}, units={len(units)}, unseen={len(unseen)}, "
         f"directional_assets={len(DIRECTIONAL_ASSETS)}"
     )
+
+
+def verify(attempts: int = 24, delay_seconds: int = 5) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            verify_once()
+            return
+        except (RuntimeError, urllib.error.URLError, TimeoutError) as error:
+            last_error = error
+            if attempt < attempts:
+                print(f"production not ready ({attempt}/{attempts}): {error}", file=sys.stderr)
+                time.sleep(delay_seconds)
+    raise RuntimeError(f"production did not converge after {attempts} attempts") from last_error
 
 
 def deploy(skip_verify: bool) -> None:

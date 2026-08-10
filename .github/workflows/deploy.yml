@@ -30,8 +30,10 @@ jobs:
           node --check frontend/app.js
           node scripts/check_directional_walk.cjs
           node scripts/check_building_popover.cjs
-          python3 -m py_compile modal_app.py scripts/modal_manage.py
+          node scripts/check_snapshot_buffer.cjs
+          python3 -m py_compile modal_app.py scripts/modal_manage.py scripts/process_resource_activity_sprites.py scripts/check_resource_activity_assets.py
           python3 scripts/check_depleted_asset.py
+          python3 scripts/check_resource_activity_assets.py
 
   deploy:
     needs: quality

@@ -12,9 +12,9 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - Eight meaningful, individually connected Voronoi-style biome regions.
 - Persistent explored fog; unit/building sight produces visible, explored-dim, and unseen-dark terrain. Never-seen entities are omitted, while discovered static resources remain as dimmed map memory.
 - Two villagers, initially idle, and one starting town-center base.
-- Wood-bearing trees, food-bearing berry bushes, and stone deposits.
-- Shared wood, food, and stone stockpiles.
-- One buildable building type: town center, with one active production slot and a typed set of allowed products.
+- Deterministically placed wood, food, stone, gold, iron, clay, and fiber nodes, each on a compatible biome and at least 120 world units from every other node.
+- Seven typed shared stockpiles.
+- One buildable building type: town center, with one active production/research slot and typed product and technology sets.
 - No autonomous task selection, random world generation, resource regeneration, combat, health, or LLM behavior.
 
 ### Simulation
@@ -22,8 +22,8 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - An idle villager does nothing across arbitrary ticks.
 - A move order makes an idle villager walk to valid selected ground and reveal terrain along the route.
 - A gather order makes the villager walk to the selected resource.
-- At the resource, the villager gathers its typed material at a deterministic rate until depletion.
-- Gathered material enters the matching shared stockpile.
+- At the resource, the villager gathers its typed material into a bounded 20-unit load.
+- Full and final partial loads return to the nearest town center, deposit exactly once into the matching stockpile, then resume the same order if material remains.
 - When the resource is depleted, the villager becomes idle.
 - A build order validates the selected villager, position, and wood cost.
 - Wood is reserved exactly once when the build order is accepted.
@@ -32,6 +32,7 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - The villager becomes idle afterward.
 - Busy villagers reject replacement orders for this milestone.
 - A town center can produce one villager at a time from its allowed product set, reserving 50 food exactly once and completing after six seconds.
+- A town center can research Forestry, Agriculture, Masonry, Mining, and Textiles, enforcing prerequisites and reserving 40 food plus 20 wood exactly once; completed research improves matching gather rates by 20%.
 
 ### Persistence and networking
 
@@ -49,8 +50,9 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - Entities draw in stable ground-depth order.
 - Tap/click selects a villager.
 - With a villager selected, tap/click empty ground to move.
-- Tap/click a tree, berry bush, or stone deposit to gather.
-- Tap/click a town center to select it and train one villager at a time.
+- Tap/click any visible resource to gather with a two-frame resource-specific activity animation.
+- Tap/click a town center to train one villager or research one available technology at a time.
+- Rendering runs independently of network arrival and interpolates only compatible authoritative movement snapshots without extrapolation.
 - Build image button enters placement mode; tap/click ground to build.
 - Drag pans; wheel/pinch zooms.
 - Touch targets are at least 48×48 CSS pixels and respect mobile safe areas.
@@ -76,7 +78,7 @@ Required set:
 | `agent_walk_01.png` | 256×256 | 40×40 | same baseline and identity |
 | `agent_walk_02.png` | 256×256 | 40×40 | same baseline and identity |
 | six directional walk frames | 256×256 | 40×40 | diagonal-toward, down-front, and up-back two-frame cycles |
-| `agent_gather.png` | 256×256 | 40×40 | same baseline and identity |
+| 14 resource-specific gather frames | 256×256 | 40×40 | two frames each for seven resource kinds |
 | `agent_build.png` | 256×256 | 40×40 | same baseline and identity |
 | `resource_tree.png` | 256×256 | 35×35 | trunk bottom-center |
 | `resource_berries.png` | 256×256 | 35×35 | bush bottom-center |
@@ -107,7 +109,7 @@ Only after Milestone 1 is stable:
 
 - Grid-aware collision and simple path routing.
 - Building placement validity and occupancy.
-- Villager carrying/deposit animation if it improves gameplay clarity.
+- Dedicated visible carried-load sprites if they improve clarity beyond the delivered cargo status and gathering cycles.
 - More coherent terrain variants and transitions.
 - One additional building or resource only if it deepens the loop.
 - Audio feedback and tactile mobile interaction polish.

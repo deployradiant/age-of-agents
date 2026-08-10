@@ -13,6 +13,60 @@ fn voronoi_terrain_is_fixed_and_deterministic() {
 }
 
 #[test]
+fn resources_are_deterministic_separated_bounded_and_biome_compatible() {
+    let world = GameWorld::default();
+    assert_eq!(world.resources, GameWorld::default().resources);
+
+    let counts = world
+        .resources
+        .iter()
+        .fold(BTreeMap::new(), |mut counts, resource| {
+            *counts.entry(resource.kind).or_insert(0) += 1;
+            counts
+        });
+    assert_eq!(
+        counts,
+        BTreeMap::from([
+            (ResourceKind::Wood, 6),
+            (ResourceKind::Food, 4),
+            (ResourceKind::Stone, 4),
+            (ResourceKind::Gold, 2),
+            (ResourceKind::Iron, 2),
+            (ResourceKind::Clay, 2),
+            (ResourceKind::Fiber, 2),
+        ])
+    );
+
+    for (index, resource) in world.resources.iter().enumerate() {
+        assert!((0.0..=world.width).contains(&resource.position.x));
+        assert!((0.0..=world.height).contains(&resource.position.y));
+        assert!(
+            resource.position.distance(Position {
+                x: 1200.0,
+                y: 800.0
+            }) >= STARTING_BASE_RESOURCE_CLEARANCE
+        );
+        let coordinate = world.cell_for_position(resource.position).unwrap();
+        let biome = world
+            .terrain
+            .iter()
+            .find(|cell| cell.coordinate() == coordinate)
+            .unwrap()
+            .biome;
+        assert!(compatible_biomes(resource.kind).contains(&biome));
+        for other in &world.resources[index + 1..] {
+            assert!(
+                resource.position.distance(other.position) + f64::EPSILON
+                    >= RESOURCE_MIN_SEPARATION,
+                "{} overlaps {}",
+                resource.id,
+                other.id
+            );
+        }
+    }
+}
+
+#[test]
 fn voronoi_terrain_contains_exactly_all_eight_biomes() {
     let biomes: BTreeSet<_> = GameWorld::default()
         .terrain
@@ -380,7 +434,7 @@ fn missing_town_center_retains_cargo_until_a_deposit_is_possible() {
 }
 
 #[test]
-fn default_world_has_three_resource_kinds_and_a_productive_base() {
+fn default_world_has_seven_resource_kinds_and_a_productive_research_base() {
     let world = GameWorld::default();
     let kinds: BTreeSet<_> = world
         .resources
@@ -389,17 +443,35 @@ fn default_world_has_three_resource_kinds_and_a_productive_base() {
         .collect();
     assert_eq!(
         kinds,
-        BTreeSet::from([ResourceKind::Wood, ResourceKind::Food, ResourceKind::Stone,])
+        BTreeSet::from([
+            ResourceKind::Wood,
+            ResourceKind::Food,
+            ResourceKind::Stone,
+            ResourceKind::Gold,
+            ResourceKind::Iron,
+            ResourceKind::Clay,
+            ResourceKind::Fiber,
+        ])
     );
     assert_eq!(world.buildings.len(), 1);
     assert_eq!(world.buildings[0].kind, BuildingKind::TownCenter);
     assert_eq!(world.buildings[0].produces, vec![ProductKind::Villager]);
-    assert_eq!(world.buildings[0].production, None);
+    assert_eq!(world.buildings[0].researches, TechnologyKind::ALL);
+    assert_eq!(world.buildings[0].job, None);
+    assert!(world.researched_technologies.is_empty());
 }
 
 #[test]
 fn depositing_routes_each_carried_resource_to_its_typed_stockpile() {
-    for kind in [ResourceKind::Wood, ResourceKind::Food, ResourceKind::Stone] {
+    for kind in [
+        ResourceKind::Wood,
+        ResourceKind::Food,
+        ResourceKind::Stone,
+        ResourceKind::Gold,
+        ResourceKind::Iron,
+        ResourceKind::Clay,
+        ResourceKind::Fiber,
+    ] {
         let mut world = GameWorld::default();
         let resource_index = world
             .resources
@@ -410,7 +482,13 @@ fn depositing_routes_each_carried_resource_to_its_typed_stockpile() {
         world.tick(1.0);
         assert_eq!(world.units[0].cargo.as_ref().unwrap().kind, kind);
         assert_eq!(
-            world.stockpile.wood + world.stockpile.food + world.stockpile.stone,
+            world.stockpile.wood
+                + world.stockpile.food
+                + world.stockpile.stone
+                + world.stockpile.gold
+                + world.stockpile.iron
+                + world.stockpile.clay
+                + world.stockpile.fiber,
             0.0
         );
 
@@ -420,6 +498,10 @@ fn depositing_routes_each_carried_resource_to_its_typed_stockpile() {
             ResourceKind::Wood => world.stockpile.wood,
             ResourceKind::Food => world.stockpile.food,
             ResourceKind::Stone => world.stockpile.stone,
+            ResourceKind::Gold => world.stockpile.gold,
+            ResourceKind::Iron => world.stockpile.iron,
+            ResourceKind::Clay => world.stockpile.clay,
+            ResourceKind::Fiber => world.stockpile.fiber,
         };
         assert_eq!(deposited, 10.0);
         assert_eq!(world.resources[resource_index].amount, 0.0);
@@ -449,13 +531,98 @@ fn town_center_produces_one_villager_at_a_time_and_reserves_food_once() {
 
     world.tick(VILLAGER_PRODUCTION_SECONDS - 0.1);
     assert_eq!(world.units.len(), 2);
-    assert!(world.buildings[0].production.is_some());
+    assert!(world.buildings[0].job.is_some());
     world.tick(0.1);
     assert_eq!(world.units.len(), 3);
     assert_eq!(world.units[2].id, "villager-3");
     assert_eq!(world.units[2].action, UnitAction::Idle);
-    assert_eq!(world.buildings[0].production, None);
+    assert_eq!(world.buildings[0].job, None);
     assert_eq!(world.stockpile.food, 50.0);
+}
+
+#[test]
+fn research_uses_the_building_slot_reserves_once_and_enforces_prerequisites() {
+    let mut world = GameWorld::default();
+    world.stockpile.food = 100.0;
+    world.stockpile.wood = 100.0;
+
+    let before_missing_prerequisite = world.clone();
+    assert_eq!(
+        world.apply_command(Command::Research {
+            building_id: "base-1".into(),
+            technology: TechnologyKind::Mining,
+        }),
+        Err(CommandError::MissingTechnologyPrerequisite)
+    );
+    assert_eq!(world, before_missing_prerequisite);
+
+    world
+        .apply_command(Command::Research {
+            building_id: "base-1".into(),
+            technology: TechnologyKind::Masonry,
+        })
+        .unwrap();
+    assert_eq!(world.stockpile.food, 60.0);
+    assert_eq!(world.stockpile.wood, 80.0);
+
+    let before_busy_rejection = world.clone();
+    assert_eq!(
+        world.apply_command(Command::Produce {
+            building_id: "base-1".into(),
+            product: ProductKind::Villager,
+        }),
+        Err(CommandError::BuildingBusy)
+    );
+    assert_eq!(world, before_busy_rejection);
+
+    world.tick(RESEARCH_SECONDS - 0.1);
+    assert!(world.researched_technologies.is_empty());
+    world.tick(0.1);
+    assert_eq!(world.researched_technologies, vec![TechnologyKind::Masonry]);
+    assert_eq!(world.buildings[0].job, None);
+
+    let before_duplicate = world.clone();
+    assert_eq!(
+        world.apply_command(Command::Research {
+            building_id: "base-1".into(),
+            technology: TechnologyKind::Masonry,
+        }),
+        Err(CommandError::TechnologyAlreadyResearched)
+    );
+    assert_eq!(world, before_duplicate);
+}
+
+#[test]
+fn researched_abilities_make_their_resources_twenty_percent_faster() {
+    for (technology, resource_kind) in [
+        (TechnologyKind::Forestry, ResourceKind::Wood),
+        (TechnologyKind::Agriculture, ResourceKind::Food),
+        (TechnologyKind::Masonry, ResourceKind::Stone),
+        (TechnologyKind::Masonry, ResourceKind::Clay),
+        (TechnologyKind::Mining, ResourceKind::Gold),
+        (TechnologyKind::Mining, ResourceKind::Iron),
+        (TechnologyKind::Textiles, ResourceKind::Fiber),
+    ] {
+        let mut world = GameWorld {
+            researched_technologies: vec![technology],
+            ..GameWorld::default()
+        };
+        let index = world
+            .resources
+            .iter()
+            .position(|resource| resource.kind == resource_kind)
+            .unwrap();
+        world.resources[index].amount = 20.0;
+        world.units[0].position = world.resources[index].position;
+        world
+            .apply_command(Command::Gather {
+                unit_id: "villager-1".into(),
+                resource_id: world.resources[index].id.clone(),
+            })
+            .unwrap();
+        world.tick(1.0);
+        assert_eq!(world.resources[index].amount, 8.0, "{technology:?}");
+    }
 }
 
 #[test]

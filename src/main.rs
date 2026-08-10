@@ -344,7 +344,8 @@ mod tests {
 
     #[test]
     fn snapshots_serialize_typed_visibility_without_unseen_entities() {
-        let message = ServerMessage::snapshot(4, &GameWorld::default());
+        let world = GameWorld::default();
+        let message = ServerMessage::snapshot(4, &world);
         let json = serde_json::to_value(message).unwrap();
         assert_eq!(json["type"], "snapshot");
         assert_eq!(json["sequence"], 4);
@@ -358,6 +359,6 @@ mod tests {
             let is_unseen = cell["visibility"] == "unseen";
             is_unseen == cell.get("biome").is_none()
         }));
-        assert!(json["world"]["resources"].as_array().unwrap().len() < 14);
+        assert!(json["world"]["resources"].as_array().unwrap().len() < world.resources.len());
     }
 }

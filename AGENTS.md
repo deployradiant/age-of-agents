@@ -8,14 +8,14 @@ Despite the project name, the initial game contains **no LLM-controlled or auton
 
 ## Milestone 1
 
-The first playable demo proves exactly four things:
+The current playable demo proves these loops:
 
 1. Isometric terrain tiles render cleanly on desktop and mobile.
-2. A player can select a villager and command it to gather wood.
-3. The villager walks to the chosen tree, gathers until it is depleted, then becomes idle.
-4. A player can command a villager to construct one building; it walks to the site, performs construction for a real duration, completes one building, then becomes idle.
+2. A player can command a villager through typed gathering, bounded carrying, town-center deposits, and deterministic resumption across seven biome-compatible resources.
+3. A player can construct a town center and train villagers through its single authoritative job slot.
+4. A player can research five bounded gathering improvements through that same job slot.
 
-Keep the world deterministic and small. Do not add combat, pathfinding frameworks, autonomous task selection, LLM calls, tech trees, multiple resource economies, multiplayer, fog of war, or generalized engine abstractions before this milestone is excellent.
+Keep the world deterministic and small. Do not add combat, pathfinding frameworks, autonomous task selection, LLM calls, multiplayer, or generalized engine abstractions before this milestone is excellent.
 
 ## Architecture
 
@@ -31,7 +31,9 @@ Keep the world deterministic and small. Do not add combat, pathfinding framework
 
 - Tap/click a villager to select it.
 - Tap/click a resource with a villager selected to issue a gather order.
+- Villagers carry at most 20 typed units, deposit at a town center, and resume unfinished gathering.
 - Tap/click the build button, then valid ground, to issue a build order.
+- Tap/click a town center to train a villager or start available research through its capability popover.
 - Drag pans. Wheel/pinch zooms.
 - Mouse and touch semantics must match.
 - A busy villager rejects replacement orders in Milestone 1; this avoids cancellation/refund complexity.
