@@ -69,6 +69,20 @@ const assetPaths = {
   walkUp1: '/assets/game/agent_walk_up_01.png',
   walkUp2: '/assets/game/agent_walk_up_02.png',
   gather: '/assets/game/agent_gather.png',
+  gatherWood1: '/assets/game/agent_gather_wood_01.png',
+  gatherWood2: '/assets/game/agent_gather_wood_02.png',
+  gatherFood1: '/assets/game/agent_gather_food_01.png',
+  gatherFood2: '/assets/game/agent_gather_food_02.png',
+  gatherStone1: '/assets/game/agent_gather_stone_01.png',
+  gatherStone2: '/assets/game/agent_gather_stone_02.png',
+  gatherGold1: '/assets/game/agent_gather_gold_01.png',
+  gatherGold2: '/assets/game/agent_gather_gold_02.png',
+  gatherIron1: '/assets/game/agent_gather_iron_01.png',
+  gatherIron2: '/assets/game/agent_gather_iron_02.png',
+  gatherClay1: '/assets/game/agent_gather_clay_01.png',
+  gatherClay2: '/assets/game/agent_gather_clay_02.png',
+  gatherFiber1: '/assets/game/agent_gather_fiber_01.png',
+  gatherFiber2: '/assets/game/agent_gather_fiber_02.png',
   build: '/assets/game/agent_build.png',
   tree: '/assets/game/resource_tree.png',
   treeDepleted: '/assets/game/resource_tree_depleted.png',
@@ -307,7 +321,13 @@ function walkPresentation(position, target) {
 }
 
 function spriteForUnit(unit, now) {
-  if (unit.state === 'gathering') return sprites.gather;
+  if (unit.state === 'gathering') {
+    const kind = String(unit.resourceKind || '');
+    const prefix = kind ? `gather${kind[0].toUpperCase()}${kind.slice(1)}` : '';
+    const frames = prefix ? [sprites[`${prefix}1`], sprites[`${prefix}2`]] : [];
+    if (frames.every(frame => frame?.image)) return frames[Math.floor(now / 260) % 2];
+    return sprites.gather;
+  }
   if (unit.state === 'building') {
     const frames = [sprites.build, sprites.idle];
     return frames[Math.floor(now / 260) % frames.length];
@@ -827,6 +847,7 @@ function connect() {
           const action = unit.action?.type || 'idle';
           let state = 'idle';
           let target = null;
+          let resourceKind = null;
           if (action === 'move') {
             state = 'moving';
             target = unit.action;
@@ -835,6 +856,7 @@ function connect() {
             const distance = resource ? Math.hypot(unit.position.x - resource.position.x, unit.position.y - resource.position.y) : Infinity;
             state = distance > 0.5 ? 'moving' : 'gathering';
             target = resource?.position || null;
+            resourceKind = resource?.kind || null;
           } else if (action === 'build') {
             const distance = Math.hypot(unit.position.x - unit.action.x, unit.position.y - unit.action.y);
             state = distance > 0.5 ? 'moving' : 'building';
@@ -845,6 +867,7 @@ function connect() {
             ...withPosition(unit),
             name: unit.name || unit.id.replace(/^villager-/, 'Villager '),
             state,
+            resourceKind,
             walkDirection: walk.direction,
             walkFlip: walk.flip
           };
