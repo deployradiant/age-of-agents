@@ -49,6 +49,8 @@ let requestSequence = 0;
 let lastSnapshotSequence = 0;
 let minimumSnapshotSequence = 0;
 let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, food: 0, stone: 0, terrain: [], units: [], resources: [], buildings: [] };
+let authoritativeWorld = world;
+const snapshotBuffer = window.SnapshotBuffer.createSnapshotBuffer();
 let tick = 0;
 const camera = { x: 0, y: 0, zoom: 0.8 };
 const pressedPanKeys = new Set();
@@ -435,6 +437,7 @@ function drawEntity(item, now) {
 
 function render(now) {
   requestAnimationFrame(render);
+  world = snapshotBuffer.presentation(now) || authoritativeWorld;
   if (previousFrameTime !== null) panCameraWithKeyboard((now - previousFrameTime) / 1000);
   previousFrameTime = now;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -465,7 +468,7 @@ function showToast(message) {
 }
 
 function selectedUnit() {
-  return world.units.find(unit => unit.id === selectedUnitId) || null;
+  return authoritativeWorld.units.find(unit => unit.id === selectedUnitId) || null;
 }
 
 function resolveSelectedBuilding(buildings, selectedId, visibilityAt) {
@@ -475,7 +478,7 @@ function resolveSelectedBuilding(buildings, selectedId, visibilityAt) {
 }
 
 function selectedBuilding() {
-  return resolveSelectedBuilding(world.buildings, selectedBuildingId, visibilityAtWorldPosition);
+  return resolveSelectedBuilding(authoritativeWorld.buildings, selectedBuildingId, visibilityAtWorldPosition);
 }
 
 function capabilityId(value) {
@@ -803,6 +806,7 @@ function connect() {
     reconnectAttempt = 0;
     lastSnapshotSequence = 0;
     minimumSnapshotSequence = 0;
+    snapshotBuffer.clear();
     connection.className = 'online';
     connection.textContent = 'Connected';
   };
@@ -845,7 +849,7 @@ function connect() {
             walkFlip: walk.flip
           };
         };
-        world = {
+        const normalizedWorld = {
           width: Number(next.width) || 2400,
           height: Number(next.height) || 1600,
           cellSize: Number(next.cell_size) || TILE,
@@ -857,6 +861,9 @@ function connect() {
           resources: Array.isArray(next.resources) ? next.resources.map(withPosition) : [],
           buildings: Array.isArray(next.buildings) ? next.buildings.map(withPosition) : []
         };
+        snapshotBuffer.push(sequence, normalizedWorld, performance.now());
+        authoritativeWorld = normalizedWorld;
+        world = normalizedWorld;
         tick = Number(next.tick) || 0;
         if (!receivedSnapshot) {
           centerCamera();
