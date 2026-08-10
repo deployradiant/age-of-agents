@@ -107,14 +107,31 @@ mod tests {
     }
 
     #[test]
-    fn persistence_round_trip() {
+    fn persistence_round_trips_carried_cargo_and_gather_phase() {
         let path = temporary_db("roundtrip");
         let store = Store::from_path(&path);
         store.initialize().unwrap();
         let mut world = GameWorld::default();
-        world.stockpile.wood = 13.0;
+        world.units[0].position = world.resources[0].position;
+        world
+            .apply_command(crate::game::Command::Gather {
+                unit_id: "villager-1".into(),
+                resource_id: "tree-1".into(),
+            })
+            .unwrap();
+        world.tick(0.5);
         store.save(&world).unwrap();
-        assert_eq!(store.load().unwrap(), Some(world));
+
+        let loaded = store.load().unwrap().unwrap();
+        assert_eq!(loaded, world);
+        assert_eq!(loaded.units[0].cargo.as_ref().unwrap().amount, 5.0);
+        assert!(matches!(
+            loaded.units[0].action,
+            crate::game::UnitAction::Gather {
+                phase: crate::game::GatherPhase::Gathering,
+                ..
+            }
+        ));
         std::fs::remove_file(path).unwrap();
     }
 

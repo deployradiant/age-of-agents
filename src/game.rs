@@ -15,6 +15,7 @@ pub const VILLAGER_FOOD_COST: f64 = 50.0;
 pub const VILLAGER_PRODUCTION_SECONDS: f64 = 6.0;
 const MOVE_SPEED: f64 = 120.0;
 const GATHER_RATE: f64 = 10.0;
+pub const VILLAGER_CARRY_CAPACITY: f64 = 20.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Position {
@@ -84,9 +85,36 @@ pub struct SnapshotTerrainCell {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UnitAction {
     Idle,
-    Move { x: f64, y: f64 },
-    Gather { resource_id: String },
-    Build { x: f64, y: f64, work_seconds: f64 },
+    Move {
+        x: f64,
+        y: f64,
+    },
+    Gather {
+        resource_id: String,
+        #[serde(default)]
+        phase: GatherPhase,
+    },
+    Build {
+        x: f64,
+        y: f64,
+        work_seconds: f64,
+    },
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GatherPhase {
+    #[default]
+    ToResource,
+    Gathering,
+    Returning,
+    Depositing,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CarriedResource {
+    pub kind: ResourceKind,
+    pub amount: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,6 +122,8 @@ pub struct Unit {
     pub id: String,
     pub position: Position,
     pub action: UnitAction,
+    #[serde(default)]
+    pub cargo: Option<CarriedResource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -249,6 +279,7 @@ impl Default for GameWorld {
                         y: 880.0,
                     },
                     action: UnitAction::Idle,
+                    cargo: None,
                 },
                 Unit {
                     id: "villager-2".into(),
@@ -257,6 +288,7 @@ impl Default for GameWorld {
                         y: 880.0,
                     },
                     action: UnitAction::Idle,
+                    cargo: None,
                 },
             ],
             resources: vec![
@@ -365,7 +397,10 @@ impl GameWorld {
                 if resource.amount <= 0.0 {
                     return Err(CommandError::ResourceDepleted);
                 }
-                self.units[unit_index].action = UnitAction::Gather { resource_id };
+                self.units[unit_index].action = UnitAction::Gather {
+                    resource_id,
+                    phase: GatherPhase::ToResource,
+                };
                 Ok(())
             }
             Command::Build { unit_id, x, y } => {
@@ -443,7 +478,9 @@ impl GameWorld {
             match self.units[index].action.clone() {
                 UnitAction::Idle => {}
                 UnitAction::Move { x, y } => self.tick_move(index, Position { x, y }, dt),
-                UnitAction::Gather { resource_id } => self.tick_gather(index, resource_id, dt),
+                UnitAction::Gather { resource_id, phase } => {
+                    self.tick_gather(index, resource_id, phase, dt)
+                }
                 UnitAction::Build { x, y, work_seconds } => {
                     self.tick_build(index, Position { x, y }, work_seconds, dt)
                 }
@@ -568,36 +605,167 @@ impl GameWorld {
         }
     }
 
-    fn tick_gather(&mut self, unit_index: usize, resource_id: String, dt: f64) {
+    fn tick_gather(&mut self, unit_index: usize, resource_id: String, phase: GatherPhase, dt: f64) {
+        match phase {
+            GatherPhase::ToResource => self.tick_to_resource(unit_index, resource_id, dt),
+            GatherPhase::Gathering => self.tick_at_resource(unit_index, resource_id, dt),
+            GatherPhase::Returning => self.tick_returning(unit_index, resource_id, dt),
+            GatherPhase::Depositing => self.tick_depositing(unit_index, resource_id),
+        }
+    }
+
+    fn tick_to_resource(&mut self, unit_index: usize, resource_id: String, dt: f64) {
         let Some(resource_index) = self
             .resources
             .iter()
             .position(|resource| resource.id == resource_id)
         else {
-            self.units[unit_index].action = UnitAction::Idle;
+            self.finish_or_return_with_cargo(unit_index, resource_id);
             return;
         };
         if self.resources[resource_index].amount <= 0.0 {
-            self.units[unit_index].action = UnitAction::Idle;
+            self.finish_or_return_with_cargo(unit_index, resource_id);
+            return;
+        }
+        if self.units[unit_index]
+            .cargo
+            .as_ref()
+            .is_some_and(|cargo| cargo.amount + f64::EPSILON >= VILLAGER_CARRY_CAPACITY)
+        {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
             return;
         }
 
         let target = self.resources[resource_index].position;
         let remaining = move_toward(&mut self.units[unit_index].position, target, dt);
-        if remaining <= 0.0 {
+        if self.units[unit_index].position.distance(target) > f64::EPSILON {
             return;
         }
-        let gathered = (GATHER_RATE * remaining).min(self.resources[resource_index].amount);
+        self.set_gather_phase(unit_index, resource_id.clone(), GatherPhase::Gathering);
+        if remaining > 0.0 {
+            self.tick_at_resource(unit_index, resource_id, remaining);
+        }
+    }
+
+    fn tick_at_resource(&mut self, unit_index: usize, resource_id: String, dt: f64) {
+        let Some(resource_index) = self
+            .resources
+            .iter()
+            .position(|resource| resource.id == resource_id)
+        else {
+            self.finish_or_return_with_cargo(unit_index, resource_id);
+            return;
+        };
+        if self.resources[resource_index].amount <= f64::EPSILON {
+            self.resources[resource_index].amount = 0.0;
+            self.finish_or_return_with_cargo(unit_index, resource_id);
+            return;
+        }
+
+        let kind = self.resources[resource_index].kind;
+        if self.units[unit_index]
+            .cargo
+            .as_ref()
+            .is_some_and(|cargo| cargo.kind != kind)
+        {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
+            return;
+        }
+        let carried = self.units[unit_index]
+            .cargo
+            .as_ref()
+            .map_or(0.0, |cargo| cargo.amount);
+        let capacity_left = (VILLAGER_CARRY_CAPACITY - carried).max(0.0);
+        let gathered = (GATHER_RATE * dt)
+            .min(self.resources[resource_index].amount)
+            .min(capacity_left);
         self.resources[resource_index].amount -= gathered;
-        match self.resources[resource_index].kind {
-            ResourceKind::Wood => self.stockpile.wood += gathered,
-            ResourceKind::Food => self.stockpile.food += gathered,
-            ResourceKind::Stone => self.stockpile.stone += gathered,
+        if gathered > 0.0 {
+            let cargo = self.units[unit_index]
+                .cargo
+                .get_or_insert(CarriedResource { kind, amount: 0.0 });
+            cargo.amount += gathered;
         }
         if self.resources[resource_index].amount <= f64::EPSILON {
             self.resources[resource_index].amount = 0.0;
+        }
+        let full = self.units[unit_index]
+            .cargo
+            .as_ref()
+            .is_some_and(|cargo| cargo.amount + f64::EPSILON >= VILLAGER_CARRY_CAPACITY);
+        if full || self.resources[resource_index].amount == 0.0 {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
+        }
+    }
+
+    fn tick_returning(&mut self, unit_index: usize, resource_id: String, dt: f64) {
+        if self.units[unit_index].cargo.is_none() {
+            self.resume_or_finish_gather(unit_index, resource_id);
+            return;
+        }
+        let Some(target) = self.nearest_town_center(self.units[unit_index].position) else {
+            return;
+        };
+        move_toward(&mut self.units[unit_index].position, target, dt);
+        if self.units[unit_index].position.distance(target) <= f64::EPSILON {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Depositing);
+        }
+    }
+
+    fn tick_depositing(&mut self, unit_index: usize, resource_id: String) {
+        let Some(target) = self.nearest_town_center(self.units[unit_index].position) else {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
+            return;
+        };
+        if self.units[unit_index].position.distance(target) > f64::EPSILON {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
+            return;
+        }
+        if let Some(cargo) = self.units[unit_index].cargo.take() {
+            match cargo.kind {
+                ResourceKind::Wood => self.stockpile.wood += cargo.amount,
+                ResourceKind::Food => self.stockpile.food += cargo.amount,
+                ResourceKind::Stone => self.stockpile.stone += cargo.amount,
+            }
+        }
+        self.resume_or_finish_gather(unit_index, resource_id);
+    }
+
+    fn finish_or_return_with_cargo(&mut self, unit_index: usize, resource_id: String) {
+        if self.units[unit_index].cargo.is_some() {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
+        } else {
             self.units[unit_index].action = UnitAction::Idle;
         }
+    }
+
+    fn resume_or_finish_gather(&mut self, unit_index: usize, resource_id: String) {
+        let resource_remains = self
+            .resources
+            .iter()
+            .any(|resource| resource.id == resource_id && resource.amount > f64::EPSILON);
+        if resource_remains {
+            self.set_gather_phase(unit_index, resource_id, GatherPhase::ToResource);
+        } else {
+            self.units[unit_index].action = UnitAction::Idle;
+        }
+    }
+
+    fn set_gather_phase(&mut self, unit_index: usize, resource_id: String, phase: GatherPhase) {
+        self.units[unit_index].action = UnitAction::Gather { resource_id, phase };
+    }
+
+    fn nearest_town_center(&self, position: Position) -> Option<Position> {
+        self.buildings
+            .iter()
+            .filter(|building| building.kind == BuildingKind::TownCenter)
+            .min_by(|left, right| {
+                position
+                    .distance(left.position)
+                    .total_cmp(&position.distance(right.position))
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+            .map(|building| building.position)
     }
 
     fn tick_build(&mut self, unit_index: usize, target: Position, work_seconds: f64, dt: f64) {
@@ -642,6 +810,7 @@ impl GameWorld {
                         y: (building_position.y + 80.0).min(self.height),
                     },
                     action: UnitAction::Idle,
+                    cargo: None,
                 });
                 self.next_unit_id += 1;
             }

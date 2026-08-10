@@ -222,6 +222,7 @@ fn completed_buildings_reveal_with_the_larger_building_radius() {
             y: 800.0,
         },
         action: UnitAction::Idle,
+        cargo: None,
     });
     let unit_visible = world
         .snapshot()
@@ -242,24 +243,139 @@ fn idle_world_is_invariant_except_tick() {
     assert_eq!(world, initial);
 }
 
-#[test]
-fn gather_moves_collects_directly_and_finishes_on_depletion() {
-    let mut world = GameWorld::default();
-    world.units[0].position = world.resources[0].position;
-    world.resources[0].amount = 15.0;
+fn start_gather_at_resource(world: &mut GameWorld, resource_index: usize, amount: f64) {
+    let resource_id = world.resources[resource_index].id.clone();
+    world.resources[resource_index].amount = amount;
+    world.units[0].position = world.resources[resource_index].position;
     world
         .apply_command(Command::Gather {
             unit_id: "villager-1".into(),
-            resource_id: "tree-1".into(),
+            resource_id,
         })
         .unwrap();
+}
 
-    world.tick(1.0);
-    assert_eq!(world.stockpile.wood, 10.0);
-    assert!(matches!(world.units[0].action, UnitAction::Gather { .. }));
-    world.tick(0.5);
-    assert_eq!(world.stockpile.wood, 15.0);
+fn assert_gather_phase(unit: &Unit, expected: GatherPhase) {
+    assert!(matches!(
+        unit.action,
+        UnitAction::Gather { phase, .. } if phase == expected
+    ));
+}
+
+#[test]
+fn partial_last_load_is_carried_then_deposited_before_becoming_idle() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 15.0);
+
+    world.tick(1.5);
+    assert_eq!(world.stockpile.wood, 0.0);
+    assert_eq!(
+        world.units[0].cargo,
+        Some(CarriedResource {
+            kind: ResourceKind::Wood,
+            amount: 15.0,
+        })
+    );
     assert_eq!(world.resources[0].amount, 0.0);
+    assert_gather_phase(&world.units[0], GatherPhase::Returning);
+
+    world.tick(100.0);
+    assert_gather_phase(&world.units[0], GatherPhase::Depositing);
+    assert_eq!(world.stockpile.wood, 0.0);
+    world.tick(0.1);
+    assert_eq!(world.stockpile.wood, 15.0);
+    assert_eq!(world.units[0].cargo, None);
+    assert_eq!(world.units[0].action, UnitAction::Idle);
+}
+
+#[test]
+fn full_load_deposits_and_resumes_the_same_gather_order() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 25.0);
+
+    world.tick(2.0);
+    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 20.0);
+    assert_eq!(world.resources[0].amount, 5.0);
+    assert_eq!(world.stockpile.wood, 0.0);
+    assert_gather_phase(&world.units[0], GatherPhase::Returning);
+    world.tick(100.0);
+    world.tick(0.1);
+
+    assert_eq!(world.stockpile.wood, 20.0);
+    assert_eq!(world.units[0].cargo, None);
+    assert!(matches!(
+        &world.units[0].action,
+        UnitAction::Gather { resource_id, phase: GatherPhase::ToResource }
+            if resource_id == "tree-1"
+    ));
+}
+
+#[test]
+fn repeated_round_trips_deposit_every_load_and_finish_after_depletion() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 45.0);
+
+    for expected_stockpile in [20.0, 40.0, 45.0] {
+        world.tick(100.0);
+        assert_gather_phase(&world.units[0], GatherPhase::Returning);
+        world.tick(100.0);
+        assert_gather_phase(&world.units[0], GatherPhase::Depositing);
+        world.tick(0.1);
+        assert_eq!(world.stockpile.wood, expected_stockpile);
+    }
+
+    assert_eq!(world.resources[0].amount, 0.0);
+    assert_eq!(world.units[0].cargo, None);
+    assert_eq!(world.units[0].action, UnitAction::Idle);
+}
+
+#[test]
+fn depositing_is_exactly_once_across_later_ticks() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 10.0);
+    world.tick(1.0);
+    world.tick(100.0);
+    world.tick(0.1);
+    assert_eq!(world.stockpile.wood, 10.0);
+
+    world.tick(100.0);
+    assert_eq!(world.stockpile.wood, 10.0);
+}
+
+#[test]
+fn deleted_resource_returns_existing_cargo_and_then_finishes() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 20.0);
+    world.tick(0.5);
+    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 5.0);
+    world.resources.remove(0);
+
+    world.tick(0.1);
+    assert_gather_phase(&world.units[0], GatherPhase::Returning);
+    world.tick(100.0);
+    world.tick(0.1);
+    assert_eq!(world.stockpile.wood, 5.0);
+    assert_eq!(world.units[0].action, UnitAction::Idle);
+}
+
+#[test]
+fn missing_town_center_retains_cargo_until_a_deposit_is_possible() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 10.0);
+    world.tick(1.0);
+    let position = world.units[0].position;
+    let town_center = world.buildings.remove(0);
+
+    world.tick(100.0);
+    assert_eq!(world.units[0].position, position);
+    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 10.0);
+    assert_eq!(world.stockpile.wood, 0.0);
+    assert_gather_phase(&world.units[0], GatherPhase::Returning);
+
+    world.buildings.push(town_center);
+    world.tick(100.0);
+    world.tick(0.1);
+    assert_eq!(world.stockpile.wood, 10.0);
     assert_eq!(world.units[0].action, UnitAction::Idle);
 }
 
@@ -282,7 +398,7 @@ fn default_world_has_three_resource_kinds_and_a_productive_base() {
 }
 
 #[test]
-fn gathering_routes_each_resource_to_its_stockpile() {
+fn depositing_routes_each_carried_resource_to_its_typed_stockpile() {
     for kind in [ResourceKind::Wood, ResourceKind::Food, ResourceKind::Stone] {
         let mut world = GameWorld::default();
         let resource_index = world
@@ -290,22 +406,22 @@ fn gathering_routes_each_resource_to_its_stockpile() {
             .iter()
             .position(|resource| resource.kind == kind)
             .unwrap();
-        let resource_id = world.resources[resource_index].id.clone();
-        world.resources[resource_index].amount = 10.0;
-        world.units[0].position = world.resources[resource_index].position;
-        world
-            .apply_command(Command::Gather {
-                unit_id: "villager-1".into(),
-                resource_id,
-            })
-            .unwrap();
+        start_gather_at_resource(&mut world, resource_index, 10.0);
         world.tick(1.0);
-        let gathered = match kind {
+        assert_eq!(world.units[0].cargo.as_ref().unwrap().kind, kind);
+        assert_eq!(
+            world.stockpile.wood + world.stockpile.food + world.stockpile.stone,
+            0.0
+        );
+
+        world.tick(100.0);
+        world.tick(0.1);
+        let deposited = match kind {
             ResourceKind::Wood => world.stockpile.wood,
             ResourceKind::Food => world.stockpile.food,
             ResourceKind::Stone => world.stockpile.stone,
         };
-        assert_eq!(gathered, 10.0);
+        assert_eq!(deposited, 10.0);
         assert_eq!(world.resources[resource_index].amount, 0.0);
     }
 }
