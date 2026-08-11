@@ -321,7 +321,7 @@ fn partial_last_load_is_carried_then_deposited_before_becoming_idle() {
     let mut world = GameWorld::default();
     start_gather_at_resource(&mut world, 0, 15.0);
 
-    world.tick(1.5);
+    world.tick(15.0 / GATHER_RATE);
     assert_eq!(world.stockpile.wood, 0.0);
     assert_eq!(
         world.units[0].cargo,
@@ -347,7 +347,7 @@ fn full_load_deposits_and_resumes_the_same_gather_order() {
     let mut world = GameWorld::default();
     start_gather_at_resource(&mut world, 0, 25.0);
 
-    world.tick(2.0);
+    world.tick(VILLAGER_CARRY_CAPACITY / GATHER_RATE);
     assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 20.0);
     assert_eq!(world.resources[0].amount, 5.0);
     assert_eq!(world.stockpile.wood, 0.0);
@@ -387,7 +387,7 @@ fn repeated_round_trips_deposit_every_load_and_finish_after_depletion() {
 fn depositing_is_exactly_once_across_later_ticks() {
     let mut world = GameWorld::default();
     start_gather_at_resource(&mut world, 0, 10.0);
-    world.tick(1.0);
+    world.tick(10.0 / GATHER_RATE);
     world.tick(100.0);
     world.tick(0.1);
     assert_eq!(world.stockpile.wood, 10.0);
@@ -401,14 +401,17 @@ fn deleted_resource_returns_existing_cargo_and_then_finishes() {
     let mut world = GameWorld::default();
     start_gather_at_resource(&mut world, 0, 20.0);
     world.tick(0.5);
-    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 5.0);
+    assert_eq!(
+        world.units[0].cargo.as_ref().unwrap().amount,
+        GATHER_RATE * 0.5
+    );
     world.resources.remove(0);
 
     world.tick(0.1);
     assert_gather_phase(&world.units[0], GatherPhase::Returning);
     world.tick(100.0);
     world.tick(0.1);
-    assert_eq!(world.stockpile.wood, 5.0);
+    assert_eq!(world.stockpile.wood, GATHER_RATE * 0.5);
     assert_eq!(world.units[0].action, UnitAction::Idle);
 }
 
@@ -416,7 +419,7 @@ fn deleted_resource_returns_existing_cargo_and_then_finishes() {
 fn missing_town_center_retains_cargo_until_a_deposit_is_possible() {
     let mut world = GameWorld::default();
     start_gather_at_resource(&mut world, 0, 10.0);
-    world.tick(1.0);
+    world.tick(10.0 / GATHER_RATE);
     let position = world.units[0].position;
     let town_center = world.buildings.remove(0);
 
@@ -479,7 +482,7 @@ fn depositing_routes_each_carried_resource_to_its_typed_stockpile() {
             .position(|resource| resource.kind == kind)
             .unwrap();
         start_gather_at_resource(&mut world, resource_index, 10.0);
-        world.tick(1.0);
+        world.tick(10.0 / GATHER_RATE);
         assert_eq!(world.units[0].cargo.as_ref().unwrap().kind, kind);
         assert_eq!(
             world.stockpile.wood
@@ -621,8 +624,52 @@ fn researched_abilities_make_their_resources_twenty_percent_faster() {
             })
             .unwrap();
         world.tick(1.0);
-        assert_eq!(world.resources[index].amount, 8.0, "{technology:?}");
+        assert_eq!(
+            world.resources[index].amount,
+            20.0 - GATHER_RATE * GATHERING_TECH_MULTIPLIER,
+            "{technology:?}"
+        );
     }
+}
+
+#[test]
+fn gatherer_waits_at_the_resource_until_the_load_is_full() {
+    let mut world = GameWorld::default();
+    start_gather_at_resource(&mut world, 0, 100.0);
+
+    world.tick(4.0);
+    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 8.0);
+    assert_gather_phase(&world.units[0], GatherPhase::Gathering);
+    assert_eq!(world.units[0].position, world.resources[0].position);
+
+    world.tick(6.0);
+    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 20.0);
+    assert_gather_phase(&world.units[0], GatherPhase::Returning);
+}
+
+#[test]
+fn simulation_speed_is_authoritative_validated_and_can_pause() {
+    let mut world = GameWorld::default();
+    world
+        .apply_command(Command::SetSimulationSpeed { multiplier: 0.0 })
+        .unwrap();
+    let paused = world.clone();
+    world.tick(100.0);
+    assert_eq!(world, paused);
+
+    world
+        .apply_command(Command::SetSimulationSpeed { multiplier: 2.0 })
+        .unwrap();
+    start_gather_at_resource(&mut world, 0, 100.0);
+    world.tick(1.0);
+    assert_eq!(world.units[0].cargo.as_ref().unwrap().amount, 4.0);
+
+    let before_invalid = world.clone();
+    assert_eq!(
+        world.apply_command(Command::SetSimulationSpeed { multiplier: 3.0 }),
+        Err(CommandError::InvalidSimulationSpeed)
+    );
+    assert_eq!(world, before_invalid);
 }
 
 #[test]

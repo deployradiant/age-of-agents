@@ -10,6 +10,7 @@ const ironValue = document.querySelector('#iron strong');
 const clayValue = document.querySelector('#clay strong');
 const fiberValue = document.querySelector('#fiber strong');
 const connection = document.getElementById('connection');
+const speedControls = document.getElementById('speed-controls');
 const selection = document.getElementById('selection');
 const buildingPopover = document.getElementById('building-popover');
 const buildingPopoverTitle = document.getElementById('building-popover-title');
@@ -53,7 +54,7 @@ let reconnectAttempt = 0;
 let requestSequence = 0;
 let lastSnapshotSequence = 0;
 let minimumSnapshotSequence = 0;
-let world = { width: 2400, height: 1600, cellSize: TILE, wood: 0, food: 0, stone: 0, gold: 0, iron: 0, clay: 0, fiber: 0, terrain: [], units: [], resources: [], buildings: [] };
+let world = { width: 2400, height: 1600, cellSize: TILE, simulationSpeed: 1, wood: 0, food: 0, stone: 0, gold: 0, iron: 0, clay: 0, fiber: 0, terrain: [], units: [], resources: [], buildings: [] };
 let authoritativeWorld = world;
 const snapshotBuffer = window.SnapshotBuffer.createSnapshotBuffer();
 let tick = 0;
@@ -308,23 +309,6 @@ function drawConstructionSites() {
   }
 }
 
-function walkPresentation(position, target) {
-  if (!target) return { direction: 'side', flip: false };
-  const dx = Number(target.x) - Number(position.x);
-  const dy = Number(target.y) - Number(position.y);
-  const screenX = dx - dy;
-  const screenY = (dx + dy) / 2;
-  const vertical = Math.abs(screenX) <= Math.abs(screenY) * 0.55;
-  const direction = vertical
-    ? (screenY >= 0 ? 'down' : 'up')
-    : screenY > 0
-      ? 'diag_toward'
-      : Math.abs(screenY) > Math.abs(screenX) * 0.2
-        ? 'up'
-        : 'side';
-  return { direction, flip: !vertical && screenX > 0 };
-}
-
 function spriteForUnit(unit, now) {
   if (unit.state === 'gathering') {
     const kind = String(unit.resourceKind || '');
@@ -381,14 +365,16 @@ function visibilityAtWorldPosition(x, y) {
 }
 
 function drawEntity(item, now) {
-  const point = project(Number(item.data.x) || 0, Number(item.data.y) || 0);
+  const projected = project(Number(item.data.x) || 0, Number(item.data.y) || 0);
+  const point = { x: projected.x + (Number(item.data.screenOffsetX) || 0) * camera.zoom, y: projected.y };
+  const villager = item.type === 'unit' || item.type === 'activity';
   const resourceScales = item.data.kind === 'wood' ? [105, 112] : item.data.kind === 'food' ? [92, 78] : [100, 92];
-  const scales = item.type === 'building' ? [150, 145] : item.type === 'resource' ? resourceScales : [88, 94];
+  const scales = item.type === 'building' ? [150, 145] : item.type === 'resource' ? resourceScales : item.type === 'activity' ? [106, 112] : [88, 94];
   const width = scales[0] * camera.zoom;
   const height = scales[1] * camera.zoom;
   if (point.x < -width || point.x > cssWidth + width || point.y < -height || point.y > cssHeight + height) return;
 
-  const selected = (item.type === 'unit' && item.data.id === selectedUnitId)
+  const selected = (villager && item.data.id === selectedUnitId)
     || (item.type === 'building' && item.data.id === selectedBuildingId);
   if (selected) {
     ctx.beginPath();
@@ -410,7 +396,7 @@ function drawEntity(item, now) {
 
   const depletedResource = item.type === 'resource' && Number(item.data.amount) <= 0;
   let asset;
-  if (item.type === 'unit') asset = spriteForUnit(item.data, now);
+  if (villager) asset = spriteForUnit(item.data, now);
   else if (item.type === 'building') asset = sprites.building;
   else if (item.data.kind === 'wood') asset = depletedResource && sprites.treeDepleted?.image ? sprites.treeDepleted : sprites.tree;
   else if (item.data.kind === 'food') asset = sprites.berries;
@@ -426,7 +412,7 @@ function drawEntity(item, now) {
   if (asset && asset.image) {
     const ratio = asset.image.width / asset.image.height;
     const drawWidth = width * Math.min(1.35, Math.max(0.72, ratio));
-    if (item.type === 'unit' && item.data.walkFlip) {
+    if (villager && item.data.walkFlip) {
       ctx.save();
       ctx.translate(point.x, 0);
       ctx.scale(-1, 1);
@@ -468,21 +454,12 @@ function render(now) {
   if (previousFrameTime !== null) panCameraWithKeyboard((now - previousFrameTime) / 1000);
   previousFrameTime = now;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#17231b';
+  ctx.fillStyle = '#020504';
   ctx.fillRect(0, 0, cssWidth, cssHeight);
   drawGround();
   drawConstructionSites();
   hits.length = 0;
-  const entities = [
-    ...world.resources.map(data => ({ type: 'resource', data })),
-    ...world.buildings.map(data => ({ type: 'building', data })),
-    ...world.units.map(data => ({ type: 'unit', data }))
-  ];
-  entities.sort((a, b) => {
-    const depth = item => (Number(item.data.x) || 0) + (Number(item.data.y) || 0);
-    return depth(a) - depth(b);
-  });
-  entities.forEach(item => drawEntity(item, now));
+  ActivityPresentation.entities(world).forEach(item => drawEntity(item, now));
   positionBuildingPopover();
   if (mousePosition) updateCursor(mousePosition.x, mousePosition.y);
 }
@@ -592,6 +569,7 @@ function updateHud() {
   ironValue.textContent = String(Math.floor(world.iron ?? 0));
   clayValue.textContent = String(Math.floor(world.clay ?? 0));
   fiberValue.textContent = String(Math.floor(world.fiber ?? 0));
+  for (const button of speedControls.querySelectorAll('button')) button.classList.toggle('active', Number(button.dataset.speed) === world.simulationSpeed);
   const unit = selectedUnit();
   const building = selectedBuilding();
   if (!unit) selectedUnitId = null;
@@ -664,7 +642,7 @@ function updateCursor(x, y) {
     hoveredHit = hitAt(x, y);
   }
   if (buildMode) canvas.style.cursor = 'crosshair';
-  else if (laptopModeQuery.matches && (['unit', 'resource', 'building'].includes(hoveredHit?.type) || selectedUnit())) canvas.style.cursor = 'pointer';
+  else if (laptopModeQuery.matches && (['unit', 'activity', 'resource', 'building'].includes(hoveredHit?.type) || selectedUnit())) canvas.style.cursor = 'pointer';
   else canvas.style.cursor = laptopModeQuery.matches ? 'grab' : '';
 }
 
@@ -693,7 +671,17 @@ function handleTap(x, y) {
     sendCommand({ type: 'move', unit_id: unit.id, x: ground.x, y: ground.y });
     return;
   }
-  if (hit.type === 'unit') {
+  if (hit.type === 'activity') {
+    const unit = selectedUnit();
+    const resource = hit.data.activityResource;
+    if (unit?.state === 'idle' && resource && unit.id !== hit.data.id) {
+      sendCommand({ type: 'gather', unit_id: unit.id, resource_id: resource.id });
+    } else {
+      selectedUnitId = hit.data.id;
+      selectedBuildingId = null;
+      updateHud();
+    }
+  } else if (hit.type === 'unit') {
     selectedUnitId = hit.data.id;
     selectedBuildingId = null;
     updateHud();
@@ -866,39 +854,15 @@ function connect() {
           x: Number(item.position?.x) || 0,
           y: Number(item.position?.y) || 0
         });
-        const unitForDisplay = unit => {
-          const action = unit.action?.type || 'idle';
-          let state = 'idle';
-          let target = null;
-          let resourceKind = null;
-          if (action === 'move') {
-            state = 'moving';
-            target = unit.action;
-          } else if (action === 'gather') {
-            const resource = next.resources?.find(item => item.id === unit.action.resource_id);
-            const distance = resource ? Math.hypot(unit.position.x - resource.position.x, unit.position.y - resource.position.y) : Infinity;
-            state = distance > 0.5 ? 'moving' : 'gathering';
-            target = resource?.position || null;
-            resourceKind = resource?.kind || null;
-          } else if (action === 'build') {
-            const distance = Math.hypot(unit.position.x - unit.action.x, unit.position.y - unit.action.y);
-            state = distance > 0.5 ? 'moving' : 'building';
-            target = unit.action;
-          }
-          const walk = walkPresentation(unit.position, target);
-          return {
-            ...withPosition(unit),
-            name: unit.name || unit.id.replace(/^villager-/, 'Villager '),
-            state,
-            resourceKind,
-            walkDirection: walk.direction,
-            walkFlip: walk.flip
-          };
+        const presentationWorld = {
+          resources: Array.isArray(next.resources) ? next.resources : [],
+          buildings: Array.isArray(next.buildings) ? next.buildings : []
         };
         const normalizedWorld = {
           width: Number(next.width) || 2400,
           height: Number(next.height) || 1600,
           cellSize: Number(next.cell_size) || TILE,
+          simulationSpeed: Number.isFinite(Number(next.simulation_speed)) ? Number(next.simulation_speed) : 1,
           wood: Number(next.stockpile?.wood) || 0,
           food: Number(next.stockpile?.food) || 0,
           stone: Number(next.stockpile?.stone) || 0,
@@ -907,7 +871,7 @@ function connect() {
           clay: Number(next.stockpile?.clay) || 0,
           fiber: Number(next.stockpile?.fiber) || 0,
           terrain: Array.isArray(next.terrain) ? next.terrain : [],
-          units: Array.isArray(next.units) ? next.units.map(unitForDisplay) : [],
+          units: Array.isArray(next.units) ? next.units.map(unit => ActivityPresentation.presentUnit(unit, presentationWorld)) : [],
           resources: Array.isArray(next.resources) ? next.resources.map(withPosition) : [],
           buildings: Array.isArray(next.buildings) ? next.buildings.map(building => ({ ...withPosition(building), researched_technologies: next.researched_technologies || [] })) : []
         };
@@ -968,6 +932,10 @@ researchActions.addEventListener('click', event => {
   const technology = event.target.closest('button[data-tech]')?.dataset.tech;
   const building = selectedBuilding();
   if (technology && building) sendCommand({ type: 'research', building_id: building.id, technology });
+});
+speedControls.addEventListener('click', event => {
+  const multiplier = Number(event.target.closest('button[data-speed]')?.dataset.speed);
+  if (Number.isFinite(multiplier)) sendCommand({ type: 'set_simulation_speed', multiplier });
 });
 cancelButton.addEventListener('click', cancelBuild);
 resetWorldButton.addEventListener('click', resetWorld);

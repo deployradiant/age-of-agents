@@ -20,8 +20,12 @@ pub const GATHERING_TECH_MULTIPLIER: f64 = 1.2;
 pub const RESOURCE_MIN_SEPARATION: f64 = 120.0;
 pub const STARTING_BASE_RESOURCE_CLEARANCE: f64 = 200.0;
 const MOVE_SPEED: f64 = 120.0;
-const GATHER_RATE: f64 = 10.0;
+pub(crate) const GATHER_RATE: f64 = 2.0;
 pub const VILLAGER_CARRY_CAPACITY: f64 = 20.0;
+
+fn default_simulation_speed() -> f64 {
+    1.0
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Position {
@@ -257,6 +261,8 @@ pub struct GameWorld {
     pub height: f64,
     pub cell_size: f64,
     pub tick: u64,
+    #[serde(default = "default_simulation_speed")]
+    pub simulation_speed: f64,
     pub terrain: Vec<TerrainCell>,
     pub explored_cells: Vec<CellCoordinate>,
     pub units: Vec<Unit>,
@@ -274,6 +280,7 @@ pub struct WorldSnapshot {
     pub height: f64,
     pub cell_size: f64,
     pub tick: u64,
+    pub simulation_speed: f64,
     pub terrain: Vec<SnapshotTerrainCell>,
     pub units: Vec<Unit>,
     pub resources: Vec<ResourceNode>,
@@ -307,6 +314,9 @@ pub enum Command {
         building_id: String,
         technology: TechnologyKind,
     },
+    SetSimulationSpeed {
+        multiplier: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,6 +336,7 @@ pub enum CommandError {
     TechnologyAlreadyResearched,
     MissingTechnologyPrerequisite,
     InsufficientResearchResources,
+    InvalidSimulationSpeed,
 }
 
 impl std::fmt::Display for CommandError {
@@ -346,6 +357,7 @@ impl std::fmt::Display for CommandError {
             Self::TechnologyAlreadyResearched => "technology is already researched",
             Self::MissingTechnologyPrerequisite => "technology prerequisite is not researched",
             Self::InsufficientResearchResources => "research requires 40 food and 20 wood",
+            Self::InvalidSimulationSpeed => "simulation speed must be 0, 1, or 2",
         };
         f.write_str(message)
     }
@@ -359,6 +371,7 @@ impl Default for GameWorld {
             height: WORLD_HEIGHT,
             cell_size: CELL_SIZE,
             tick: 0,
+            simulation_speed: default_simulation_speed(),
             terrain: terrain.clone(),
             explored_cells: Vec::new(),
             units: vec![
@@ -607,6 +620,13 @@ impl GameWorld {
                 });
                 Ok(())
             }
+            Command::SetSimulationSpeed { multiplier } => {
+                if ![0.0, 1.0, 2.0].contains(&multiplier) {
+                    return Err(CommandError::InvalidSimulationSpeed);
+                }
+                self.simulation_speed = multiplier;
+                Ok(())
+            }
         }
     }
 
@@ -645,6 +665,10 @@ impl GameWorld {
         if !dt.is_finite() || dt <= 0.0 {
             return;
         }
+        let dt = dt * self.simulation_speed;
+        if dt <= 0.0 {
+            return;
+        }
         self.tick += 1;
         for index in 0..self.units.len() {
             match self.units[index].action.clone() {
@@ -681,6 +705,7 @@ impl GameWorld {
             height: self.height,
             cell_size: self.cell_size,
             tick: self.tick,
+            simulation_speed: self.simulation_speed,
             terrain: self
                 .terrain
                 .iter()

@@ -41,6 +41,8 @@ def verify_once() -> None:
     comparisons = {
         "/": ROOT / "frontend/index.html",
         "/frontend/app.js": ROOT / "frontend/app.js",
+        "/frontend/snapshot-buffer.js": ROOT / "frontend/snapshot-buffer.js",
+        "/frontend/activity-presentation.js": ROOT / "frontend/activity-presentation.js",
         **{
             f"/assets/game/{name}": ROOT / "assets/game" / name
             for name in DIRECTIONAL_ASSETS
@@ -62,11 +64,15 @@ def verify_once() -> None:
         raise RuntimeError("production state has no unseen terrain to verify")
     if any("biome" in cell for cell in unseen):
         raise RuntimeError("production leaks biome data for unseen terrain")
+    if state.get("simulation_speed") not in (0.0, 1.0, 2.0):
+        raise RuntimeError(f"invalid production simulation speed: {state.get('simulation_speed')}")
+    if set(state.get("stockpile", {})) != {"wood", "food", "stone", "gold", "iron", "clay", "fiber"}:
+        raise RuntimeError("production stockpile does not expose all seven resource kinds")
 
     print(
         "PASS production matches checkout; "
         f"terrain={len(terrain)}, units={len(units)}, unseen={len(unseen)}, "
-        f"directional_assets={len(DIRECTIONAL_ASSETS)}"
+        f"directional_assets={len(DIRECTIONAL_ASSETS)}, speed={state['simulation_speed']}"
     )
 
 

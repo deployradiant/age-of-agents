@@ -124,7 +124,10 @@ mod tests {
 
         let loaded = store.load().unwrap().unwrap();
         assert_eq!(loaded, world);
-        assert_eq!(loaded.units[0].cargo.as_ref().unwrap().amount, 5.0);
+        assert_eq!(
+            loaded.units[0].cargo.as_ref().unwrap().amount,
+            crate::game::GATHER_RATE * 0.5
+        );
         assert!(matches!(
             loaded.units[0].action,
             crate::game::UnitAction::Gather {

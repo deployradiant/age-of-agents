@@ -126,7 +126,9 @@ async fn game_loop(state: SharedState) {
             .iter()
             .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
             .count();
+        let previous_tick = world.tick;
         world.tick(TICK_DURATION.as_secs_f64());
+        let advanced = world.tick != previous_tick;
         let completed_action = world.buildings.len() != buildings
             || world
                 .units
@@ -134,7 +136,7 @@ async fn game_loop(state: SharedState) {
                 .filter(|unit| !matches!(unit.action, game::UnitAction::Idle))
                 .count()
                 < active_units;
-        if (world.tick % SAVE_EVERY_TICKS == 0 || completed_action)
+        if ((advanced && world.tick % SAVE_EVERY_TICKS == 0) || completed_action)
             && let Err(error) = state.store.save(&world)
         {
             tracing::error!(%error, "world save failed");

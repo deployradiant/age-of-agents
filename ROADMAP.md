@@ -22,7 +22,7 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - An idle villager does nothing across arbitrary ticks.
 - A move order makes an idle villager walk to valid selected ground and reveal terrain along the route.
 - A gather order makes the villager walk to the selected resource.
-- At the resource, the villager gathers its typed material into a bounded 20-unit load.
+- At the resource, the villager waits and gathers its typed material at two units per second into a bounded 20-unit load.
 - Full and final partial loads return to the nearest town center, deposit exactly once into the matching stockpile, then resume the same order if material remains.
 - When the resource is depleted, the villager becomes idle.
 - A build order validates the selected villager, position, and wood cost.
@@ -50,9 +50,10 @@ Build the smallest convincing RTS loop before expanding the simulation. Each mil
 - Entities draw in stable ground-depth order.
 - Tap/click selects a villager.
 - With a villager selected, tap/click empty ground to move.
-- Tap/click any visible resource to gather with a two-frame resource-specific activity animation.
+- Tap/click any visible resource to gather. During the gathering phase, one combined resource-specific villager activity replaces the separate unit and node rendering for each assigned villager; 1:n villager-to-node assignments remain commandable.
 - Tap/click a town center to train one villager or research one available technology at a time.
 - Rendering runs independently of network arrival and interpolates only compatible authoritative movement snapshots without extrapolation.
+- Equal-depth villagers render above resources, out-of-world canvas uses the unseen-fog color, and 0×/1×/2× buttons control authoritative simulation speed.
 - Build image button enters placement mode; tap/click ground to build.
 - Drag pans; wheel/pinch zooms.
 - Touch targets are at least 48×48 CSS pixels and respect mobile safe areas.

@@ -32,10 +32,12 @@ Keep the world deterministic and small. Do not add combat, pathfinding framework
 - Tap/click a villager to select it.
 - Tap/click a resource with a villager selected to issue a gather order.
 - Villagers carry at most 20 typed units, deposit at a town center, and resume unfinished gathering.
+- Gathering is phase-driven: villagers wait at the node until full or depleted, and combined activity sprites replace duplicate unit-plus-resource rendering.
 - Tap/click the build button, then valid ground, to issue a build order.
 - Tap/click a town center to train a villager or start available research through its capability popover.
 - Drag pans. Wheel/pinch zooms.
 - Mouse and touch semantics must match.
+- Simulation speed is authoritative and controlled through 0×, 1×, and 2× buttons.
 - A busy villager rejects replacement orders in Milestone 1; this avoids cancellation/refund complexity.
 
 ## Art Direction
@@ -65,6 +67,8 @@ The target is a warm, hand-drawn cel-animation look inspired by pastoral Japanes
 
 ## Workflow
 
+- At the start of every work session, read `OPEN_WORK.md` before acting.
+- Keep `OPEN_WORK.md` current after meaningful milestones, blocker changes, and before commit/push/deploy or ending a session. It is a compact current-state handoff, not an append-only diary.
 - Parent-session work may proceed directly on `master` for this solo project.
 - Every delegated subagent must work on its own feature branch or git worktree, push that branch, and open a pull request for Jakob to review. Subagents must never commit directly to `master`.
 - A subagent PR must describe its scope, verification performed, generated assets, and any known limitations. Do not merge it automatically.

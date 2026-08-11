@@ -1,12 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-
-const appPath = path.join(__dirname, '..', 'frontend', 'app.js');
-const source = fs.readFileSync(appPath, 'utf8');
-const definition = source.match(/function walkPresentation\(position, target\) \{[\s\S]*?\n\}/);
-
-if (!definition) throw new Error('walkPresentation function not found');
-eval(`${definition[0]}; globalThis.walkPresentation = walkPresentation;`);
+const { walk } = require('../frontend/activity-presentation.js');
 
 const origin = { x: 100, y: 100 };
 const cases = [
@@ -18,7 +10,7 @@ const cases = [
 ];
 
 for (const [target, direction, flip] of cases) {
-  const actual = globalThis.walkPresentation(origin, target);
+  const actual = walk(origin, target);
   if (actual.direction !== direction || actual.flip !== flip) {
     throw new Error(
       `${JSON.stringify(target)} expected ${direction}/${flip}, got ${JSON.stringify(actual)}`

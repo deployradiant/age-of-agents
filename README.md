@@ -63,7 +63,7 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 
 - **Select:** tap/click a villager or town center.
 - **Move:** with a villager selected, tap/click empty ground.
-- **Gather:** with a villager selected, tap/click a resource. Villagers carry at most 20 units, deposit at the nearest town center, and resume until depletion.
+- **Gather:** with a villager selected, tap/click a resource or an active combined gathering animation. Villagers gather two units per second, wait for a full 20-unit load unless the node depletes, deposit at the nearest town center, and resume until depletion.
 - **Build:** select a villager, press the build button, then tap/click valid ground.
 - **Produce:** select a town center and press **Train Villager** in its anchored capability popover. It reserves 50 food and produces one villager over six seconds; each building has one active production slot.
 - **Research:** select a town center and choose an available technology in its popover. Research reserves 40 food and 20 wood, occupies the building for eight seconds, and improves matching gather rates by 20%.
@@ -71,6 +71,7 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 - **Zoom:** pinch or use the mouse wheel.
 - **Recover view:** reload to center the camera on the currently visible villagers.
 - **Reset world:** press **Reset world** and confirm to erase progress and restore the deterministic starting state.
+- **Simulation speed:** use **0×**, **1×**, or **2×** in the top bar to pause or change authoritative simulation speed.
 - **Cancel build placement:** press the cancel button or Escape.
 
 Mouse and touch use the same command semantics.
@@ -87,6 +88,7 @@ node --check frontend/app.js
 node scripts/check_directional_walk.cjs
 node scripts/check_building_popover.cjs
 node scripts/check_snapshot_buffer.cjs
+node scripts/check_activity_presentation.cjs
 python3 -m py_compile modal_app.py scripts/modal_manage.py scripts/process_resource_activity_sprites.py scripts/check_resource_activity_assets.py
 python3 scripts/check_depleted_asset.py
 python3 scripts/check_resource_activity_assets.py
