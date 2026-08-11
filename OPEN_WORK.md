@@ -1,13 +1,13 @@
 # Open Work
 
-**Last updated:** 2026-08-11 23:37:14 UTC
+**Last updated:** 2026-08-11 23:40:36 UTC
 **Branch:** `master`
-**Base commit:** `30854a3`
-**Overall status:** In progress
+**Base commit:** `18daf79`
+**Overall status:** Complete
 
 ## Current goal
 
-Ship the requested gathering, rendering, simulation-speed, and fog-boundary fixes to production.
+The requested gathering, rendering, simulation-speed, and fog-boundary fixes are shipped and production-verified.
 
 ## Completed in the working tree
 
@@ -35,13 +35,14 @@ Ship the requested gathering, rendering, simulation-speed, and fog-boundary fixe
 - `frontend/app.js` remains below 1,000 lines (967)
 - Thermonuclear review — approved with no blocking structural or security findings
 - Real Chromium smoke test — pause held the authoritative tick fixed; two villagers concurrently remained gathering below capacity; two combined activities rendered with zero standalone copies of the active resource; fog background matched `rgb(2, 5, 4)`; no browser exceptions
+- Commit `18daf79` pushed to `origin/master`
+- Modal deployment completed at `https://koogle-frick--age-of-agents-web.modal.run`
+- Production parity — index, three frontend JavaScript files, and all 14 gathering frames exactly matched the checkout
+- Production WebSocket — 0× held tick `974564` unchanged, 2× applied, then speed restored to 1×
 
 ## Open work
 
-1. Commit and push `master`.
-2. Deploy the pushed commit to Modal.
-3. Verify production HTTP state, static assets, WebSocket protocol, and speed command behavior.
-4. Refresh this file to the final no-open-work state and ensure that state is committed, pushed, and deployed.
+None.
 
 ## Blockers
 
@@ -49,7 +50,7 @@ None.
 
 ## Exact next action
 
-Commit and push the verified working tree.
+None — work is complete.
 
 ## Maintenance rule
 
