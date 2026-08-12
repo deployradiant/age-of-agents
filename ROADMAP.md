@@ -108,7 +108,7 @@ Animation gates:
 
 Only after Milestone 1 is stable:
 
-- Grid-aware collision and simple path routing.
+- [x] Grid-aware occupancy collision and deterministic four-neighbor routing for movement, gathering, deposits, construction, reserved build sites, and villager spawning.
 - Building placement validity and occupancy.
 - Dedicated visible carried-load sprites if they improve clarity beyond the delivered cargo status and gathering cycles.
 - More coherent terrain variants and transitions.

@@ -15,6 +15,7 @@ The current vertical slice is intentionally bounded: command villagers through a
 - Starting town-center base with single-slot villager production
 - Seven typed shared stockpiles and a five-technology gathering tree
 - Rust-authoritative fixed-timestep simulation
+- Deterministic server-authoritative grid collision and four-neighbor routing
 - Typed WebSocket commands and snapshots
 - SQLite save/load
 - Unified mobile and desktop controls
@@ -39,6 +40,8 @@ Rust + Axum server
 ```
 
 The server owns the world. The browser renders snapshots and sends player intent; it does not simulate authoritative outcomes.
+
+Movement uses the existing 30×20 terrain cells as a deterministic occupancy grid. Buildings, live resource nodes, villagers, and accepted build sites occupy cells. The server routes villagers around occupied cells, performs gather/deposit/build work from free cardinal neighbors, rejects occupied or unreachable destinations atomically, and waits to spawn trained villagers until an adjacent cell is free. Routes are derived from authoritative state each tick rather than persisted as additional world state.
 
 ## Run locally
 

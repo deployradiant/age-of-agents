@@ -1,4 +1,5 @@
 mod game;
+mod navigation;
 mod store;
 
 use std::sync::Arc;

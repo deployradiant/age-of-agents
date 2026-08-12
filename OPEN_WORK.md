@@ -1,57 +1,56 @@
 # Open Work
 
-**Last updated:** 2026-08-11 23:40:36 UTC
+**Last updated:** 2026-08-12
 **Branch:** `master`
-**Base commit:** `18daf79`
-**Overall status:** Complete
+**Base commit:** `486e54b`
+**Overall status:** Release verification in progress
 
 ## Current goal
 
-The requested gathering, rendering, simulation-speed, and fog-boundary fixes are shipped and production-verified.
+Release deterministic server-authoritative grid collision and routing for Milestone 2.
 
-## Completed in the working tree
+## Contract
 
-- Reduced base gathering consumption from 10 to 2 units per simulated second.
-- Added regression coverage proving villagers remain at a node until their 20-unit load is full or the node depletes.
-- Made gathering presentation follow the authoritative server phase rather than infer state from distance.
-- Replaced separate resource and villager rendering with combined activity sprites during gathering.
-- Preserved 1:n villager-to-resource assignment with deterministic presentation offsets and click behavior.
-- Made villagers win equal-depth rendering ties over resources.
-- Added authoritative 0×, 1×, and 2× simulation-speed commands and controls.
-- Matched the out-of-world canvas and page background to unseen fog.
-- Added focused activity-presentation and simulation-speed tests.
-- Updated deployment verification, CI, README, ROADMAP, and repository instructions.
+- The existing 30×20 terrain cells form the navigation grid.
+- Buildings, live resource nodes, villagers, accepted move destinations, and build sites occupy cells.
+- Move orders route to a free destination cell.
+- Gather, deposit, and build work happen from a free cardinal neighbor of the occupied target.
+- Four-neighbor A* is deterministic; routes are derived from authoritative state rather than persisted.
+- Commands reject unreachable or occupied targets without mutating state or reserving costs.
+- Trained villagers wait for a free adjacent spawn cell rather than overlap another entity.
+
+## Completed but unreleased
+
+- Added deterministic four-neighbor A* in `src/navigation.rs`.
+- Added focused movement/occupancy and gathering domain modules.
+- Routed move, gather, deposit, and construction phases around occupied cells.
+- Reserved accepted move destinations and active build sites in occupancy.
+- Added atomic occupied/unreachable command rejection.
+- Made villager production wait for a free adjacent spawn cell.
+- Updated README and Milestone 2 roadmap status.
 
 ## Verification completed
 
-- `cargo fmt --check`
-- `cargo test --locked` — 37 passed
-- `cargo clippy --all-targets --all-features --locked -- -D warnings`
-- JavaScript syntax checks
-- Directional-walk, building-popover, snapshot-buffer, and activity-presentation checks
-- Python compilation
-- Depleted-resource and all 14 gathering-frame asset checks
-- `git diff --check`
-- `frontend/app.js` remains below 1,000 lines (967)
-- Thermonuclear review — approved with no blocking structural or security findings
-- Real Chromium smoke test — pause held the authoritative tick fixed; two villagers concurrently remained gathering below capacity; two combined activities rendered with zero standalone copies of the active resource; fog background matched `rgb(2, 5, 4)`; no browser exceptions
-- Commit `18daf79` pushed to `origin/master`
-- Modal deployment completed at `https://koogle-frick--age-of-agents-web.modal.run`
-- Production parity — index, three frontend JavaScript files, and all 14 gathering frames exactly matched the checkout
-- Production WebSocket — 0× held tick `974564` unchanged, 2× applied, then speed restored to 1×
+- `cargo fmt --check`.
+- `cargo test --locked` — 45 passed.
+- Strict Clippy with all targets/features and warnings denied.
+- JavaScript syntax plus directional-walk, building-popover, snapshot-buffer, and activity-presentation checks.
+- Python compilation plus depleted-resource and all gathering-frame asset checks.
+- `git diff --check`.
+- Thermonuclear review: navigation is isolated, gathering was extracted, `src/game.rs` is 941 lines, command changes remain atomic, and no frontend or persistence shape was expanded.
+- Local server booted against an isolated non-default SQLite path; `GET /state` returned 600 terrain cells, two units, one building, and authoritative speed 1×.
+- Browser automation daemon timed out and snap Chromium crashed its network service; visual browser verification is therefore limited. The frontend is unchanged by this release.
 
 ## Open work
 
-None.
+- Commit and push `master`.
+- Wait for GitHub Actions deployment.
+- Verify production artifact parity, state, and WebSocket behavior.
 
 ## Blockers
 
-None.
+None. Local visual-browser tooling is unavailable, but the release does not change frontend code.
 
 ## Exact next action
 
-None — work is complete.
-
-## Maintenance rule
-
-Keep this file current rather than appending a diary. Update it at task start, after meaningful milestones, when blockers change, before commit/push/deploy transitions, and before ending a work session. Never store credentials or tokens here.
+Commit and push the verified implementation, then verify the deployed production endpoint.

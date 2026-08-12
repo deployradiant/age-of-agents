@@ -2,6 +2,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+mod gathering;
+mod movement;
+
 pub const WORLD_WIDTH: f64 = 2400.0;
 pub const WORLD_HEIGHT: f64 = 1600.0;
 pub const CELL_SIZE: f64 = 80.0;
@@ -326,6 +329,8 @@ pub enum CommandError {
     ResourceDepleted,
     UnitBusy,
     InvalidDestination,
+    DestinationOccupied,
+    TargetUnreachable,
     InvalidBuildSite,
     InsufficientWood,
     BuildingNotFound,
@@ -347,6 +352,8 @@ impl std::fmt::Display for CommandError {
             Self::ResourceDepleted => "resource is depleted",
             Self::UnitBusy => "unit is busy",
             Self::InvalidDestination => "destination is outside the world",
+            Self::DestinationOccupied => "destination cell is occupied",
+            Self::TargetUnreachable => "target is unreachable",
             Self::InvalidBuildSite => "build site is outside the world",
             Self::InsufficientWood => "insufficient wood",
             Self::BuildingNotFound => "building not found",
@@ -529,6 +536,8 @@ impl GameWorld {
                 if !self.contains_position(x, y) {
                     return Err(CommandError::InvalidDestination);
                 }
+                let target = Position { x, y };
+                self.route_exists_to_free_cell(unit_index, target)?;
                 self.units[unit_index].action = UnitAction::Move { x, y };
                 Ok(())
             }
@@ -545,6 +554,9 @@ impl GameWorld {
                 if resource.amount <= 0.0 {
                     return Err(CommandError::ResourceDepleted);
                 }
+                if !self.interaction_route_exists(unit_index, resource.position) {
+                    return Err(CommandError::TargetUnreachable);
+                }
                 self.units[unit_index].action = UnitAction::Gather {
                     resource_id,
                     phase: GatherPhase::ToResource,
@@ -555,6 +567,13 @@ impl GameWorld {
                 let unit_index = self.unit_index_and_idle(&unit_id)?;
                 if !self.contains_position(x, y) {
                     return Err(CommandError::InvalidBuildSite);
+                }
+                let site = Position { x, y };
+                if self.site_is_occupied(site) {
+                    return Err(CommandError::InvalidBuildSite);
+                }
+                if !self.interaction_route_exists(unit_index, site) {
+                    return Err(CommandError::TargetUnreachable);
                 }
                 if self.stockpile.wood < TOWN_CENTER_WOOD_COST {
                     return Err(CommandError::InsufficientWood);
@@ -783,7 +802,7 @@ impl GameWorld {
         visible
     }
 
-    fn cell_for_position(&self, position: Position) -> Option<CellCoordinate> {
+    pub(super) fn cell_for_position(&self, position: Position) -> Option<CellCoordinate> {
         if !position.x.is_finite()
             || !position.y.is_finite()
             || !(0.0..=self.width).contains(&position.x)
@@ -796,174 +815,7 @@ impl GameWorld {
         Some(CellCoordinate { column, row })
     }
 
-    fn tick_move(&mut self, unit_index: usize, target: Position, dt: f64) {
-        move_toward(&mut self.units[unit_index].position, target, dt);
-        if self.units[unit_index].position.distance(target) <= f64::EPSILON {
-            self.units[unit_index].action = UnitAction::Idle;
-        }
-    }
-
-    fn tick_gather(&mut self, unit_index: usize, resource_id: String, phase: GatherPhase, dt: f64) {
-        match phase {
-            GatherPhase::ToResource => self.tick_to_resource(unit_index, resource_id, dt),
-            GatherPhase::Gathering => self.tick_at_resource(unit_index, resource_id, dt),
-            GatherPhase::Returning => self.tick_returning(unit_index, resource_id, dt),
-            GatherPhase::Depositing => self.tick_depositing(unit_index, resource_id),
-        }
-    }
-
-    fn tick_to_resource(&mut self, unit_index: usize, resource_id: String, dt: f64) {
-        let Some(resource_index) = self
-            .resources
-            .iter()
-            .position(|resource| resource.id == resource_id)
-        else {
-            self.finish_or_return_with_cargo(unit_index, resource_id);
-            return;
-        };
-        if self.resources[resource_index].amount <= 0.0 {
-            self.finish_or_return_with_cargo(unit_index, resource_id);
-            return;
-        }
-        if self.units[unit_index]
-            .cargo
-            .as_ref()
-            .is_some_and(|cargo| cargo.amount + f64::EPSILON >= VILLAGER_CARRY_CAPACITY)
-        {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
-            return;
-        }
-
-        let target = self.resources[resource_index].position;
-        let remaining = move_toward(&mut self.units[unit_index].position, target, dt);
-        if self.units[unit_index].position.distance(target) > f64::EPSILON {
-            return;
-        }
-        self.set_gather_phase(unit_index, resource_id.clone(), GatherPhase::Gathering);
-        if remaining > 0.0 {
-            self.tick_at_resource(unit_index, resource_id, remaining);
-        }
-    }
-
-    fn tick_at_resource(&mut self, unit_index: usize, resource_id: String, dt: f64) {
-        let Some(resource_index) = self
-            .resources
-            .iter()
-            .position(|resource| resource.id == resource_id)
-        else {
-            self.finish_or_return_with_cargo(unit_index, resource_id);
-            return;
-        };
-        if self.resources[resource_index].amount <= f64::EPSILON {
-            self.resources[resource_index].amount = 0.0;
-            self.finish_or_return_with_cargo(unit_index, resource_id);
-            return;
-        }
-
-        let kind = self.resources[resource_index].kind;
-        if self.units[unit_index]
-            .cargo
-            .as_ref()
-            .is_some_and(|cargo| cargo.kind != kind)
-        {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
-            return;
-        }
-        let carried = self.units[unit_index]
-            .cargo
-            .as_ref()
-            .map_or(0.0, |cargo| cargo.amount);
-        let capacity_left = (VILLAGER_CARRY_CAPACITY - carried).max(0.0);
-        let gathered = (GATHER_RATE * self.gather_multiplier(kind) * dt)
-            .min(self.resources[resource_index].amount)
-            .min(capacity_left);
-        self.resources[resource_index].amount -= gathered;
-        if gathered > 0.0 {
-            let cargo = self.units[unit_index]
-                .cargo
-                .get_or_insert(CarriedResource { kind, amount: 0.0 });
-            cargo.amount += gathered;
-        }
-
-        if self.resources[resource_index].amount <= f64::EPSILON {
-            self.resources[resource_index].amount = 0.0;
-        }
-        let full = self.units[unit_index]
-            .cargo
-            .as_ref()
-            .is_some_and(|cargo| cargo.amount + f64::EPSILON >= VILLAGER_CARRY_CAPACITY);
-        if full || self.resources[resource_index].amount == 0.0 {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
-        }
-    }
-
-    fn tick_returning(&mut self, unit_index: usize, resource_id: String, dt: f64) {
-        if self.units[unit_index].cargo.is_none() {
-            self.resume_or_finish_gather(unit_index, resource_id);
-            return;
-        }
-        let Some(target) = self.nearest_town_center(self.units[unit_index].position) else {
-            return;
-        };
-        move_toward(&mut self.units[unit_index].position, target, dt);
-        if self.units[unit_index].position.distance(target) <= f64::EPSILON {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Depositing);
-        }
-    }
-
-    fn tick_depositing(&mut self, unit_index: usize, resource_id: String) {
-        let Some(target) = self.nearest_town_center(self.units[unit_index].position) else {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
-            return;
-        };
-        if self.units[unit_index].position.distance(target) > f64::EPSILON {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
-            return;
-        }
-        if let Some(cargo) = self.units[unit_index].cargo.take() {
-            self.stockpile.add(cargo.kind, cargo.amount);
-        }
-        self.resume_or_finish_gather(unit_index, resource_id);
-    }
-
-    fn finish_or_return_with_cargo(&mut self, unit_index: usize, resource_id: String) {
-        if self.units[unit_index].cargo.is_some() {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::Returning);
-        } else {
-            self.units[unit_index].action = UnitAction::Idle;
-        }
-    }
-
-    fn resume_or_finish_gather(&mut self, unit_index: usize, resource_id: String) {
-        let resource_remains = self
-            .resources
-            .iter()
-            .any(|resource| resource.id == resource_id && resource.amount > f64::EPSILON);
-        if resource_remains {
-            self.set_gather_phase(unit_index, resource_id, GatherPhase::ToResource);
-        } else {
-            self.units[unit_index].action = UnitAction::Idle;
-        }
-    }
-
-    fn set_gather_phase(&mut self, unit_index: usize, resource_id: String, phase: GatherPhase) {
-        self.units[unit_index].action = UnitAction::Gather { resource_id, phase };
-    }
-
-    fn nearest_town_center(&self, position: Position) -> Option<Position> {
-        self.buildings
-            .iter()
-            .filter(|building| building.kind == BuildingKind::TownCenter)
-            .min_by(|left, right| {
-                position
-                    .distance(left.position)
-                    .total_cmp(&position.distance(right.position))
-                    .then_with(|| left.id.cmp(&right.id))
-            })
-            .map(|building| building.position)
-    }
-
-    fn gather_multiplier(&self, resource: ResourceKind) -> f64 {
+    pub(super) fn gather_multiplier(&self, resource: ResourceKind) -> f64 {
         if self
             .researched_technologies
             .iter()
@@ -974,8 +826,12 @@ impl GameWorld {
             1.0
         }
     }
+
     fn tick_build(&mut self, unit_index: usize, target: Position, work_seconds: f64, dt: f64) {
-        let remaining = move_toward(&mut self.units[unit_index].position, target, dt);
+        let (arrived, remaining) = self.tick_toward_interaction(unit_index, target, dt);
+        if !arrived {
+            return;
+        }
         let completed_work = work_seconds + remaining;
         if completed_work + f64::EPSILON < BUILD_SECONDS {
             self.units[unit_index].action = UnitAction::Build {
@@ -1010,15 +866,18 @@ impl GameWorld {
                     });
                     return;
                 }
-                let position = self.buildings[building_index].position;
                 match product {
                     ProductKind::Villager => {
+                        let Some(position) = self.spawn_position(building_index) else {
+                            self.buildings[building_index].job = Some(BuildingJob::Produce {
+                                product,
+                                elapsed_seconds,
+                            });
+                            return;
+                        };
                         self.units.push(Unit {
                             id: format!("villager-{}", self.next_unit_id),
-                            position: Position {
-                                x: (position.x + 100.0).min(self.width),
-                                y: (position.y + 80.0).min(self.height),
-                            },
+                            position,
                             action: UnitAction::Idle,
                             cargo: None,
                         });
@@ -1044,6 +903,20 @@ impl GameWorld {
         }
         self.buildings[building_index].job = None;
     }
+}
+
+pub(super) fn move_along(
+    position: &mut Position,
+    waypoints: impl IntoIterator<Item = Position>,
+    mut dt: f64,
+) -> f64 {
+    for target in waypoints {
+        dt = move_toward(position, target, dt);
+        if *position != target || dt <= f64::EPSILON {
+            return 0.0;
+        }
+    }
+    dt
 }
 
 /// Moves for up to `dt`, returning any time left after reaching the target.
