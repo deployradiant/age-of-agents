@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-12
 **Branch:** `master`
 **Base commit:** `9fc3722`
-**Overall status:** Release verification complete; awaiting commit/deploy
+**Overall status:** Complete
 
 ## Current goal
 
@@ -30,15 +30,22 @@ Villager sprites were drawn using a hard-coded `0.88 × height` ground anchor ev
 - Added a focused top-tick and frame-aware villager-anchor frontend check.
 - Thermonuclear review passes: the movement fix is a six-line boundary correction in the canonical module; the rendering fix derives frame data once at asset load; no new state model or branch sprawl was introduced; `src/game.rs` remains 941 lines and `frontend/app.js` remains below 1,000 lines.
 - Local isolated server boots and serves the fixed checkout. Browser automation still times out because the host Chromium daemon is unhealthy; the rendering contract is covered by focused static checks and existing presentation checks.
+- Commit `5d7d54c` was pushed to `origin/master`; GitHub Actions run `31633329063` passed quality and deployment.
+- Modal production matches the checkout, including the updated frontend artifacts.
+- The previously stuck production villager left `to_resource`, reached a centered grid position `(1160, 840)`, and remained idle across six advancing production-state samples.
 
 ## Open work
 
-- Commit/push `master`, deploy, and verify production.
+None.
 
 ## Blockers
 
-None. Stale leaked headless Chromium processes caused initial compiler memory starvation; they were terminated and available memory returned to normal.
+None. Browser screenshot automation remains unavailable on this host, but focused rendering checks and deployed artifact parity pass.
 
 ## Exact next action
 
-Commit and push the verified fix, then verify the production deployment and that the previously stuck villager leaves `to_resource`.
+None — work is complete.
+
+## Maintenance rule
+
+Keep this file current rather than appending a diary. Update it at task start, after meaningful milestones, when blockers change, before commit/push/deploy transitions, and before ending a work session. Never store credentials or tokens here.
