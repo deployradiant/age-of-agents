@@ -104,10 +104,16 @@ impl GameWorld {
         let Some((destination, route)) = self.interaction_route(unit_index, target_cell) else {
             return (false, 0.0);
         };
-        let waypoints: Vec<_> = route
+        let mut waypoints: Vec<_> = route
             .into_iter()
             .map(|cell| self.cell_center(cell))
             .collect();
+        if waypoints
+            .last()
+            .is_none_or(|waypoint| *waypoint != destination)
+        {
+            waypoints.push(destination);
+        }
         let remaining = move_along(&mut self.units[unit_index].position, waypoints, dt);
         (self.units[unit_index].position == destination, remaining)
     }

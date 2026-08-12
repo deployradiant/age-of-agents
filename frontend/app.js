@@ -10,6 +10,7 @@ const ironValue = document.querySelector('#iron strong');
 const clayValue = document.querySelector('#clay strong');
 const fiberValue = document.querySelector('#fiber strong');
 const connection = document.getElementById('connection');
+const tickValue = document.querySelector('#tick strong');
 const speedControls = document.getElementById('speed-controls');
 const selection = document.getElementById('selection');
 const buildingPopover = document.getElementById('building-popover');
@@ -111,11 +112,25 @@ const biomeTextures = {
 };
 
 function loadSprite(name, url) {
-  const asset = { image: null };
+  const asset = { image: null, alphaBottom: 1 };
   sprites[name] = asset;
   const image = new Image();
   image.onload = () => {
     asset.image = image;
+    const sample = document.createElement('canvas');
+    sample.width = image.naturalWidth;
+    sample.height = image.naturalHeight;
+    const sampleContext = sample.getContext('2d');
+    sampleContext.drawImage(image, 0, 0);
+    const alpha = sampleContext.getImageData(0, 0, sample.width, sample.height).data;
+    outer: for (let y = sample.height - 1; y >= 0; y -= 1) {
+      for (let x = 0; x < sample.width; x += 1) {
+        if (alpha[(y * sample.width + x) * 4 + 3]) {
+          asset.alphaBottom = (y + 1) / sample.height;
+          break outer;
+        }
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(biomeTextures, name)) groundLayer = null;
   };
   image.onerror = () => { console.warn('Sprite failed to load', url); };
@@ -412,14 +427,15 @@ function drawEntity(item, now) {
   if (asset && asset.image) {
     const ratio = asset.image.width / asset.image.height;
     const drawWidth = width * Math.min(1.35, Math.max(0.72, ratio));
+    const top = villager ? point.y - height * asset.alphaBottom : point.y - height * 0.88;
     if (villager && item.data.walkFlip) {
       ctx.save();
       ctx.translate(point.x, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(asset.image, -drawWidth / 2, point.y - height * 0.88, drawWidth, height);
+      ctx.drawImage(asset.image, -drawWidth / 2, top, drawWidth, height);
       ctx.restore();
     } else {
-      ctx.drawImage(asset.image, point.x - drawWidth / 2, point.y - height * 0.88, drawWidth, height);
+      ctx.drawImage(asset.image, point.x - drawWidth / 2, top, drawWidth, height);
     }
   } else {
     fallbackEntity(item.data, item.type, point, camera.zoom);
@@ -562,6 +578,7 @@ function updateBuildingPopover(building) {
 }
 
 function updateHud() {
+  tickValue.textContent = String(tick);
   woodValue.textContent = String(Math.floor(world.wood ?? 0));
   foodValue.textContent = String(Math.floor(world.food ?? 0));
   stoneValue.textContent = String(Math.floor(world.stone ?? 0));

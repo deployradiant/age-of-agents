@@ -28,6 +28,8 @@
     #iron strong { color: #9eabb0; }
     #clay strong { color: #c58a66; }
     #fiber strong { color: #a8c982; }
+    #tick { color: #b9b29b; font-variant-numeric: tabular-nums; }
+    #tick strong { color: #f0d58b; }
     #top-actions { display: flex; align-items: center; gap: 10px; }
     #speed-controls { display: flex; gap: 2px; }
     #speed-controls button { min-width: 28px; min-height: 28px; padding: 2px 5px; border: 1px solid #5e583d; border-radius: 4px; background: #161b12; color: #bcb69a; cursor: pointer; }
@@ -126,7 +128,7 @@
 </head>
 <body>
   <main id="game" aria-label="Isometric game world"><canvas id="world"></canvas></main>
-  <header id="resources"><span id="stockpiles"><span id="wood">Wood <strong>0</strong></span><span id="food">Food <strong>0</strong></span><span id="stone">Stone <strong>0</strong></span><span id="gold">Gold <strong>0</strong></span><span id="iron">Iron <strong>0</strong></span><span id="clay">Clay <strong>0</strong></span><span id="fiber">Fiber <strong>0</strong></span></span><span id="top-actions"><span id="speed-controls" aria-label="Simulation speed"><button type="button" data-speed="0" aria-label="Pause simulation">0×</button><button type="button" data-speed="1" aria-label="Normal simulation speed">1×</button><button type="button" data-speed="2" aria-label="Double simulation speed">2×</button></span><button id="reset-world" type="button">Reset world</button><span id="connection">Connecting</span></span></header>
+  <header id="resources"><span id="stockpiles"><span id="wood">Wood <strong>0</strong></span><span id="food">Food <strong>0</strong></span><span id="stone">Stone <strong>0</strong></span><span id="gold">Gold <strong>0</strong></span><span id="iron">Iron <strong>0</strong></span><span id="clay">Clay <strong>0</strong></span><span id="fiber">Fiber <strong>0</strong></span></span><span id="top-actions"><span id="tick">Tick <strong>0</strong></span><span id="speed-controls" aria-label="Simulation speed"><button type="button" data-speed="0" aria-label="Pause simulation">0×</button><button type="button" data-speed="1" aria-label="Normal simulation speed">1×</button><button type="button" data-speed="2" aria-label="Double simulation speed">2×</button></span><button id="reset-world" type="button">Reset world</button><span id="connection">Connecting</span></span></header>
   <aside id="selection" class="empty">Tap a villager or town center</aside>
   <section id="building-popover" role="region" aria-labelledby="building-popover-title" hidden>
     <strong id="building-popover-title">Town Center</strong>

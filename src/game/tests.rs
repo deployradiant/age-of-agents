@@ -238,6 +238,41 @@ fn move_routes_around_an_occupied_cell() {
 }
 
 #[test]
+fn gatherer_already_in_an_adjacent_cell_reaches_its_center_and_stops_walking() {
+    let mut world = GameWorld::default();
+    world.resources.retain(|resource| resource.id == "tree-2");
+    world.buildings.clear();
+    world.units.truncate(1);
+    world.units[0].position = Position {
+        x: 1120.7243750819825,
+        y: 994.9150302281832,
+    };
+    world.units[0].action = UnitAction::Gather {
+        resource_id: "tree-2".into(),
+        phase: GatherPhase::ToResource,
+    };
+
+    for _ in 0..20 {
+        world.tick(0.05);
+    }
+
+    assert_eq!(
+        world.units[0].position,
+        Position {
+            x: 1160.0,
+            y: 1000.0
+        }
+    );
+    assert!(matches!(
+        world.units[0].action,
+        UnitAction::Gather {
+            phase: GatherPhase::Gathering,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn accepted_move_destination_is_reserved_against_other_units() {
     let mut world = GameWorld::default();
     world.resources.clear();

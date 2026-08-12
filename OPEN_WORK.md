@@ -2,61 +2,43 @@
 
 **Last updated:** 2026-08-12
 **Branch:** `master`
-**Base commit:** `486e54b`
-**Overall status:** Complete
+**Base commit:** `9fc3722`
+**Overall status:** Release verification complete; awaiting commit/deploy
 
 ## Current goal
 
-Release deterministic server-authoritative grid collision and routing for Milestone 2.
+Fix the production movement stall, realign villager highlights to their visible feet, and show the authoritative tick in the top bar.
 
-## Contract
+## Root cause
 
-- The existing 30×20 terrain cells form the navigation grid.
-- Buildings, live resource nodes, villagers, accepted move destinations, and build sites occupy cells.
-- Move orders route to a free destination cell.
-- Gather, deposit, and build work happen from a free cardinal neighbor of the occupied target.
-- Four-neighbor A* is deterministic; routes are derived from authoritative state rather than persisted.
-- Commands reject unreachable or occupied targets without mutating state or reserving costs.
-- Trained villagers wait for a free adjacent spawn cell rather than overlap another entity.
+Production showed `villager-2` frozen at `(1120.724, 994.915)` in `to_resource` while ticks advanced. The villager was already inside the selected free adjacent cell, so A* returned an empty route. Interaction movement interpreted that empty route as zero waypoints instead of centering the villager in the destination cell; the phase could therefore never complete.
 
-## Completed and released
+Villager sprites were drawn using a hard-coded `0.88 × height` ground anchor even though frame alpha bounds differ. The selection ellipse uses the projected authoritative ground point, so visible feet and highlight diverged by frame.
 
-- Added deterministic four-neighbor A* in `src/navigation.rs`.
-- Added focused movement/occupancy and gathering domain modules.
-- Routed move, gather, deposit, and construction phases around occupied cells.
-- Reserved accepted move destinations and active build sites in occupancy.
-- Added atomic occupied/unreachable command rejection.
-- Made villager production wait for a free adjacent spawn cell.
-- Updated README and Milestone 2 roadmap status.
-- Committed implementation as `5a1f0e5` and pushed it to `origin/master`.
+## Work completed locally
+
+- Added a regression reproducing the exact stuck production position.
+- Made interaction movement always include the selected destination center as its final waypoint.
+- Anchored villager sprite frames using their actual bottommost non-transparent pixel.
+- Added the authoritative tick to the persistent top bar.
 
 ## Verification completed
 
-- `cargo fmt --check`.
-- `cargo test --locked` — 45 passed.
-- Strict Clippy with all targets/features and warnings denied.
-- JavaScript syntax plus directional-walk, building-popover, snapshot-buffer, and activity-presentation checks.
-- Python compilation plus depleted-resource and all gathering-frame asset checks.
-- `git diff --check`.
-- Thermonuclear review: navigation is isolated, gathering was extracted, `src/game.rs` is 941 lines, command changes remain atomic, and no frontend or persistence shape was expanded.
-- Local server booted against an isolated non-default SQLite path; `GET /state` returned 600 terrain cells, two units, one building, and authoritative speed 1×.
-- Browser automation daemon timed out and snap Chromium crashed its network service; visual browser verification is therefore limited. The frontend is unchanged by this release.
-- GitHub Actions run `31626104736` passed both `quality` and `deploy` for commit `5a1f0e5`.
-- Modal production verification passed checkout parity: 600 terrain cells, two units, 481 unseen cells, six directional assets, and authoritative speed 1×.
-- Direct production `GET /state` returned tick `1640103`, 600 terrain cells, two units, one building, and speed 1×.
+- Focused production-state movement regression passes.
+- Full Rust suite passes — 46 tests.
+- Strict Clippy, formatting, JavaScript syntax, frontend behavior checks, Python compilation, asset checks, and `git diff --check` pass.
+- Added a focused top-tick and frame-aware villager-anchor frontend check.
+- Thermonuclear review passes: the movement fix is a six-line boundary correction in the canonical module; the rendering fix derives frame data once at asset load; no new state model or branch sprawl was introduced; `src/game.rs` remains 941 lines and `frontend/app.js` remains below 1,000 lines.
+- Local isolated server boots and serves the fixed checkout. Browser automation still times out because the host Chromium daemon is unhealthy; the rendering contract is covered by focused static checks and existing presentation checks.
 
 ## Open work
 
-None.
+- Commit/push `master`, deploy, and verify production.
 
 ## Blockers
 
-None. Local visual-browser tooling was unavailable, but the unchanged frontend passed all automated checks and production artifact parity.
+None. Stale leaked headless Chromium processes caused initial compiler memory starvation; they were terminated and available memory returned to normal.
 
 ## Exact next action
 
-None — work is complete.
-
-## Maintenance rule
-
-Keep this file current rather than appending a diary. Update it at task start, after meaningful milestones, when blockers change, before commit/push/deploy transitions, and before ending a work session. Never store credentials or tokens here.
+Commit and push the verified fix, then verify the production deployment and that the previously stuck villager leaves `to_resource`.
