@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-12
 **Branch:** `master`
 **Base commit:** `ecd6376`
-**Overall status:** Visual fix reviewed locally; awaiting release
+**Overall status:** Complete
 
 ## Current goal
 
@@ -31,10 +31,12 @@ Restore strong gameplay readability after the grid-routing release: make cell bo
 - Final screenshot review found no release-blocking grid, fog-frontier, or selection-alignment defect.
 - Full final gate passes: 46 Rust tests, strict Clippy, formatting, JavaScript syntax, all frontend checks including the grid-legibility contract, Python compilation, asset validation, and diff checks.
 - Thermonuclear review passes: the visual system is isolated in a 64-line module, `frontend/app.js` is 995 lines, no simulation or persistence shape changed, and unseen terrain is never outlined.
+- Released as `f2a7a53`; GitHub Actions run `31650967420` passed quality and deployment, and Modal parity verification passed.
+- Production screenshot review initially exposed browser-cached pre-release JavaScript despite artifact parity; a hard reload loaded the deployed grid. Final production review verified the Modal URL, visible tick, projected grid, fog frontier, selected-unit status panel, and a selection ring centered at the villager's feet with no release blocker.
 
 ## Open work
 
-Commit/push `master`, deploy, and repeat screenshot/gameplay review against production.
+None.
 
 ## Blockers
 
@@ -42,7 +44,7 @@ None. X11 screenshot capture and injected pointer input provide a working hands-
 
 ## Exact next action
 
-Release the visually reviewed candidate and verify deployed production pixels and behavior hands-on.
+None — work is complete.
 
 ## Maintenance rule
 
