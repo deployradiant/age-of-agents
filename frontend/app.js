@@ -296,6 +296,10 @@ function drawGround() {
   }
 }
 
+function drawGridOverlay() {
+  window.GridOverlay.draw(ctx, world, project, camera);
+}
+
 function drawConstructionSites() {
   for (const unit of world.units) {
     if (unit.action?.type !== 'build') continue;
@@ -392,11 +396,17 @@ function drawEntity(item, now) {
   const selected = (villager && item.data.id === selectedUnitId)
     || (item.type === 'building' && item.data.id === selectedBuildingId);
   if (selected) {
+    const radius = item.type === 'building' ? 40 : 22;
     ctx.beginPath();
-    const radius = item.type === 'building' ? 40 : 24;
     ctx.ellipse(point.x, point.y, radius * camera.zoom, radius * 0.46 * camera.zoom, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#f6c74a44'; ctx.fill();
-    ctx.strokeStyle = '#ffdb67'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#f6c74a35';
+    ctx.fill();
+    ctx.strokeStyle = '#070907e6';
+    ctx.lineWidth = Math.max(4, 5 * camera.zoom);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffe073';
+    ctx.lineWidth = Math.max(2, 2.5 * camera.zoom);
+    ctx.stroke();
   }
 
   if (hoveredHit?.type === item.type && hoveredHit.data.id === item.data.id) {
@@ -473,6 +483,7 @@ function render(now) {
   ctx.fillStyle = '#020504';
   ctx.fillRect(0, 0, cssWidth, cssHeight);
   drawGround();
+  drawGridOverlay();
   drawConstructionSites();
   hits.length = 0;
   ActivityPresentation.entities(world).forEach(item => drawEntity(item, now));
