@@ -1,9 +1,9 @@
 # Open Work
 
-**Last updated:** 2026-08-13T04:14:28Z
+**Last updated:** 2026-08-13T04:36:10Z
 **Branch:** `master`
-**Base commit:** `7c442cf`
-**Overall status:** In progress — roadmap vertical slices defined
+**Base commit:** `028b226`
+**Overall status:** In progress — first two slices implemented in review fix loops
 
 ## Current goal
 
@@ -11,26 +11,30 @@ Turn the released gather/build demo into one coherent playable RTS prototype wit
 
 ## Completed in the working tree
 
-- Rewrote `ROADMAP.md` into eight vertical slices with explicit gameplay acceptance and per-slice release gates.
-- Inspected the current architecture: authoritative domain is concentrated in `src/game.rs` (941 lines) plus gathering/movement modules; frontend `app.js` is already 995 lines and must be decomposed before feature growth.
-- Confirmed `master` and `origin/master` started aligned at `7c442cf`; no open PRs; production deploy CI for that checkpoint is running.
+- Rewrote and pushed `ROADMAP.md` as eight vertical slices with explicit gameplay and release acceptance (`028b226`).
+- Slice A implementation is isolated in PR #6 / commit `b982a0e`: typed 13-resource/building/unit/recipe/technology foundation, persisted scenario state, migration regressions, and `game.rs` decomposition.
+- Slice B implementation is isolated in PR #7 / commit `d31c34e`: drag-box/additive multi-selection, selected-count HUD, atomic typed `group_move`, deterministic distinct destination assignment, and focused JS/Rust checks.
+- Parent independently verified PR heads, changed files, 51 Slice A tests and 50 Slice B tests. Both strict Clippy runs passed after a parent fix for the enlarged snapshot enum.
+- Independent spec/thermonuclear reviews correctly blocked both PRs; fix agents are active on the same isolated branches.
 
 ## Verification completed
 
-- `git diff --check` — clean after roadmap rewrite.
-- Live Git/worktree/PR/CI state captured at mission start.
+- Baseline `028b226`: full local Rust/frontend/Python/asset gate passed; CI run 31666409158 passed quality and production deployment.
+- PR #6: `cargo test` — 51 passed; strict Clippy and `git diff --check` passed after boxing the snapshot payload.
+- PR #7: `cargo test` — 50 passed; strict Clippy, selection Node contract, and `git diff --check` passed; real local WebSocket accepted `group_move` with `applied_sequence=71`.
+- Browser daemon is unhealthy (120-second timeouts), but direct Chromium is available; visual release QA remains mandatory after integration.
 
 ## Open work
 
-1. Commit and push the roadmap checkpoint.
-2. Run at most two isolated lanes: Slice A typed domain/catalog/scenario foundation and Slice B multi-unit protocol/UI with non-overlapping ownership where practical.
-3. Independently review each lane, verify commits/PRs, integrate on `master`, run the full gate, deploy, and browser-play before selecting the next lanes.
-4. Continue through economy, scenarios, combat, raids, and balance until the expanded prototype is production-verified or externally blocked.
+1. Resolve PR #6 review blockers: split >1,000-line tests, remove duplicate recipe identity, and address remaining review findings.
+2. Resolve PR #7 blockers: preserve mouse pan, ensure collision-safe intermediate group movement, add CI/deployment parity, pointer cleanup/tests.
+3. Re-review both PRs, integrate on `master`, run full local browser-play gate, push/deploy, and production-verify.
+4. Continue through steel economy, broader economy/scenarios, combat/raids, and balance slices.
 
 ## Blockers
 
-None.
+None external. The browser tool daemon is unhealthy; use direct Chromium CDP/X11 as already established.
 
 ## Exact next action
 
-Commit/push the roadmap checkpoint, create two fresh worktrees from that commit, and delegate Slice A and Slice B with explicit file boundaries and acceptance tests.
+Wait for the two isolated fix commits, rerun independent reviews, then cherry-pick only approved commits into `master` and execute the complete local release gate.
