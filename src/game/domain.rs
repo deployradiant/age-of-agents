@@ -139,24 +139,6 @@ pub enum ResourceKind {
     Rations,
 }
 
-impl ResourceKind {
-    pub const ALL: [Self; 13] = [
-        Self::Wood,
-        Self::Food,
-        Self::Stone,
-        Self::Gold,
-        Self::Iron,
-        Self::Coal,
-        Self::Clay,
-        Self::Fiber,
-        Self::Timber,
-        Self::Steel,
-        Self::Bricks,
-        Self::Cloth,
-        Self::Rations,
-    ];
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnitKind {
@@ -166,16 +148,6 @@ pub enum UnitKind {
     Archer,
     Healer,
     SiegeCart,
-}
-
-impl UnitKind {
-    pub const ALL: [Self; 5] = [
-        Self::Villager,
-        Self::Guard,
-        Self::Archer,
-        Self::Healer,
-        Self::SiegeCart,
-    ];
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -205,25 +177,6 @@ pub enum BuildingKind {
     Infirmary,
     Watchtower,
     Monument,
-}
-
-impl BuildingKind {
-    pub const ALL: [Self; 14] = [
-        Self::TownCenter,
-        Self::MiningCamp,
-        Self::Farm,
-        Self::LumberMill,
-        Self::Smelter,
-        Self::Kiln,
-        Self::Weaver,
-        Self::Kitchen,
-        Self::Barracks,
-        Self::Range,
-        Self::Workshop,
-        Self::Infirmary,
-        Self::Watchtower,
-        Self::Monument,
-    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,13 +209,7 @@ pub enum TechnologyKind {
 }
 
 impl TechnologyKind {
-    pub const ALL: [Self; 5] = [
-        Self::Forestry,
-        Self::Agriculture,
-        Self::Masonry,
-        Self::Mining,
-        Self::Textiles,
-    ];
+    pub const ALL: [Self; 5] = ROADMAP_TECHNOLOGIES;
 
     pub(super) fn prerequisite(self) -> Option<Self> {
         match self {
@@ -327,68 +274,110 @@ impl Stockpile {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecipeKind {
-    Timber,
-    Steel,
-    Bricks,
-    Cloth,
-    Rations,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct RecipeCatalogEntry {
-    pub kind: RecipeKind,
     pub building: BuildingKind,
-    pub inputs: Vec<ResourceKind>,
+    pub inputs: &'static [ResourceKind],
     pub output: ResourceKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct DomainCatalog {
-    pub resources: Vec<ResourceKind>,
-    pub buildings: Vec<BuildingKind>,
-    pub units: Vec<UnitKind>,
-    pub recipes: Vec<RecipeCatalogEntry>,
-    pub technologies: Vec<TechnologyKind>,
+    pub resources: &'static [ResourceKind],
+    pub buildings: &'static [BuildingKind],
+    pub units: &'static [UnitKind],
+    pub recipes: &'static [RecipeCatalogEntry],
+    pub technologies: &'static [TechnologyKind],
 }
 
 impl DomainCatalog {
-    pub fn roadmap() -> Self {
-        use BuildingKind::{Kiln, Kitchen, LumberMill, Smelter, Weaver};
-        use RecipeKind::{Bricks, Cloth, Rations, Steel, Timber};
-        use ResourceKind::{Clay, Coal, Fiber, Food, Iron, Wood};
-
+    pub const fn roadmap() -> Self {
         Self {
-            resources: ResourceKind::ALL.to_vec(),
-            buildings: BuildingKind::ALL.to_vec(),
-            units: UnitKind::ALL.to_vec(),
-            recipes: vec![
-                recipe(Timber, LumberMill, &[Wood], ResourceKind::Timber),
-                recipe(Steel, Smelter, &[Iron, Coal], ResourceKind::Steel),
-                recipe(Bricks, Kiln, &[Clay, Wood], ResourceKind::Bricks),
-                recipe(Cloth, Weaver, &[Fiber], ResourceKind::Cloth),
-                recipe(Rations, Kitchen, &[Food], ResourceKind::Rations),
-            ],
-            technologies: TechnologyKind::ALL.to_vec(),
+            resources: &ROADMAP_RESOURCES,
+            buildings: &ROADMAP_BUILDINGS,
+            units: &ROADMAP_UNITS,
+            recipes: &ROADMAP_RECIPES,
+            technologies: &ROADMAP_TECHNOLOGIES,
         }
     }
 }
 
-fn recipe(
-    kind: RecipeKind,
-    building: BuildingKind,
-    inputs: &[ResourceKind],
-    output: ResourceKind,
-) -> RecipeCatalogEntry {
+pub const ROADMAP_RESOURCES: [ResourceKind; 13] = [
+    ResourceKind::Wood,
+    ResourceKind::Food,
+    ResourceKind::Stone,
+    ResourceKind::Gold,
+    ResourceKind::Iron,
+    ResourceKind::Coal,
+    ResourceKind::Clay,
+    ResourceKind::Fiber,
+    ResourceKind::Timber,
+    ResourceKind::Steel,
+    ResourceKind::Bricks,
+    ResourceKind::Cloth,
+    ResourceKind::Rations,
+];
+
+pub const ROADMAP_BUILDINGS: [BuildingKind; 14] = [
+    BuildingKind::TownCenter,
+    BuildingKind::MiningCamp,
+    BuildingKind::Farm,
+    BuildingKind::LumberMill,
+    BuildingKind::Smelter,
+    BuildingKind::Kiln,
+    BuildingKind::Weaver,
+    BuildingKind::Kitchen,
+    BuildingKind::Barracks,
+    BuildingKind::Range,
+    BuildingKind::Workshop,
+    BuildingKind::Infirmary,
+    BuildingKind::Watchtower,
+    BuildingKind::Monument,
+];
+
+pub const ROADMAP_UNITS: [UnitKind; 5] = [
+    UnitKind::Villager,
+    UnitKind::Guard,
+    UnitKind::Archer,
+    UnitKind::Healer,
+    UnitKind::SiegeCart,
+];
+
+pub const ROADMAP_RECIPES: [RecipeCatalogEntry; 5] = [
     RecipeCatalogEntry {
-        kind,
-        building,
-        inputs: inputs.to_vec(),
-        output,
-    }
-}
+        building: BuildingKind::LumberMill,
+        inputs: &[ResourceKind::Wood],
+        output: ResourceKind::Timber,
+    },
+    RecipeCatalogEntry {
+        building: BuildingKind::Smelter,
+        inputs: &[ResourceKind::Iron, ResourceKind::Coal],
+        output: ResourceKind::Steel,
+    },
+    RecipeCatalogEntry {
+        building: BuildingKind::Kiln,
+        inputs: &[ResourceKind::Clay, ResourceKind::Wood],
+        output: ResourceKind::Bricks,
+    },
+    RecipeCatalogEntry {
+        building: BuildingKind::Weaver,
+        inputs: &[ResourceKind::Fiber],
+        output: ResourceKind::Cloth,
+    },
+    RecipeCatalogEntry {
+        building: BuildingKind::Kitchen,
+        inputs: &[ResourceKind::Food],
+        output: ResourceKind::Rations,
+    },
+];
+
+pub const ROADMAP_TECHNOLOGIES: [TechnologyKind; 5] = [
+    TechnologyKind::Forestry,
+    TechnologyKind::Agriculture,
+    TechnologyKind::Masonry,
+    TechnologyKind::Mining,
+    TechnologyKind::Textiles,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
