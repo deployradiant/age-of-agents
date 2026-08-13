@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 mod domain;
 mod gathering;
 mod movement;
+#[cfg(test)]
+mod slice_a_tests;
 
 pub use domain::*;
 
@@ -54,7 +56,7 @@ pub struct GameWorld {
     next_unit_id: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WorldSnapshot {
     pub width: f64,
     pub height: f64,
@@ -67,7 +69,7 @@ pub struct WorldSnapshot {
     pub buildings: Vec<Building>,
     pub stockpile: Stockpile,
     pub researched_technologies: Vec<TechnologyKind>,
-    pub catalog: Box<DomainCatalog>,
+    pub catalog: DomainCatalog,
     pub scenario: ScenarioState,
 }
 
@@ -499,11 +501,14 @@ impl GameWorld {
             self.tick_building_job(index, dt);
         }
         self.refresh_exploration();
-        self.scenario.elapsed_ticks = self.scenario.elapsed_ticks.saturating_add(1);
-        if self.scenario.outcome == ScenarioOutcome::Running
-            && self.scenario.elapsed_ticks >= self.scenario.tick_limit
-        {
-            self.scenario.outcome = ScenarioOutcome::Lost;
+        // Slice A records terminal scenario state without enforcing Slice E's
+        // command restrictions. Gameplay keeps simulating, but terminal scenario
+        // progress is immutable once won or lost.
+        if self.scenario.outcome == ScenarioOutcome::Running {
+            self.scenario.elapsed_ticks = self.scenario.elapsed_ticks.saturating_add(1);
+            if self.scenario.elapsed_ticks >= self.scenario.tick_limit {
+                self.scenario.outcome = ScenarioOutcome::Lost;
+            }
         }
     }
 
@@ -565,7 +570,7 @@ impl GameWorld {
                 .collect(),
             stockpile: self.stockpile.clone(),
             researched_technologies: self.researched_technologies.clone(),
-            catalog: Box::new(DomainCatalog::roadmap()),
+            catalog: DomainCatalog::roadmap(),
             scenario: self.scenario.clone(),
         }
     }
