@@ -1,5 +1,4 @@
 'use strict';
-
 const canvas = document.getElementById('world');
 const ctx = canvas.getContext('2d', { alpha: false });
 const woodValue = document.querySelector('#wood strong');
@@ -28,7 +27,6 @@ const resetWorldButton = document.getElementById('reset-world');
 const placementHint = document.getElementById('placement');
 const toast = document.getElementById('toast');
 const laptopModeQuery = window.matchMedia('(min-width: 900px) and (hover: hover) and (pointer: fine)');
-
 const TILE = 80;
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 2.5;
@@ -41,7 +39,7 @@ let groundLayerKey = '';
 let cssWidth = 1;
 let cssHeight = 1;
 let dpr = 1;
-let selectedUnitId = null;
+let selectedUnitIds = new Set();
 let selectedBuildingId = null;
 let buildMode = false;
 let cameraReady = false;
@@ -64,7 +62,7 @@ const pressedPanKeys = new Set();
 let previousFrameTime = null;
 let hoveredHit = null;
 let mousePosition = null;
-
+let selectionRectangle = null;
 const assetPaths = {
   idle: '/assets/game/agent_idle.png',
   walk1: '/assets/game/agent_walk_01.png',
@@ -105,12 +103,10 @@ const assetPaths = {
   heath: '/assets/game/terrain_rock.png',
   clayland: '/assets/game/terrain_dirt.png'
 };
-
 const biomeTextures = {
   meadow: 'meadow', forest: 'forest', prairie: 'prairie', highland: 'highland',
   wetland: 'wetland', scrubland: 'scrubland', heath: 'heath', clayland: 'clayland'
 };
-
 function loadSprite(name, url) {
   const asset = { image: null, alphaBottom: 1 };
   sprites[name] = asset;
@@ -136,13 +132,10 @@ function loadSprite(name, url) {
   image.onerror = () => { console.warn('Sprite failed to load', url); };
   image.src = url;
 }
-
 Object.entries(assetPaths).forEach(([name, url]) => loadSprite(name, url));
-
 function rawProject(x, y) {
   return { x: (x - y) / 2, y: (x + y) / 4 };
 }
-
 function project(x, y) {
   const raw = rawProject(x, y);
   return {
@@ -150,24 +143,20 @@ function project(x, y) {
     y: cssHeight * 0.42 + (raw.y - camera.y) * camera.zoom
   };
 }
-
 function buildingPopoverAnchor(building, projectWorld, zoom) {
   const ground = projectWorld(Number(building.x) || 0, Number(building.y) || 0);
   return { x: ground.x, y: ground.y - 132 * Math.max(0, Number(zoom) || 0) };
 }
-
 function screenToRaw(x, y) {
   return {
     x: camera.x + (x - cssWidth / 2) / camera.zoom,
     y: camera.y + (y - cssHeight * 0.42) / camera.zoom
   };
 }
-
 function screenToWorld(x, y) {
   const raw = screenToRaw(x, y);
   return { x: raw.y * 2 + raw.x, y: raw.y * 2 - raw.x };
 }
-
 function centerCamera() {
   const focus = world.units.length
     ? world.units.reduce((sum, unit) => ({ x: sum.x + unit.x / world.units.length, y: sum.y + unit.y / world.units.length }), { x: 0, y: 0 })
@@ -178,7 +167,6 @@ function centerCamera() {
   camera.zoom = Math.max(MIN_ZOOM, Math.min(1, cssWidth < 700 ? 0.55 : 0.8));
   cameraReady = true;
 }
-
 function clampCamera() {
   const corners = [rawProject(0, 0), rawProject(world.width, 0), rawProject(0, world.height), rawProject(world.width, world.height)];
   const marginX = cssWidth * 0.35 / camera.zoom;
@@ -186,7 +174,6 @@ function clampCamera() {
   camera.x = Math.max(Math.min(...corners.map(point => point.x)) - marginX, Math.min(Math.max(...corners.map(point => point.x)) + marginX, camera.x));
   camera.y = Math.max(Math.min(...corners.map(point => point.y)) - marginY, Math.min(Math.max(...corners.map(point => point.y)) + marginY, camera.y));
 }
-
 function panCameraWithKeyboard(elapsedSeconds) {
   if (!laptopModeQuery.matches || pressedPanKeys.size === 0) return;
   let x = 0;
@@ -202,7 +189,6 @@ function panCameraWithKeyboard(elapsedSeconds) {
   camera.y += y / length * distance;
   clampCamera();
 }
-
 function resize() {
   const rect = canvas.getBoundingClientRect();
   cssWidth = Math.max(1, rect.width);
@@ -218,7 +204,6 @@ function resize() {
   else clampCamera();
   positionBuildingPopover();
 }
-
 function diamondPath(x, y, size) {
   const a = project(x, y);
   const b = project(x + size, y);
@@ -231,7 +216,6 @@ function diamondPath(x, y, size) {
   ctx.lineTo(d.x, d.y);
   ctx.closePath();
 }
-
 function buildGroundLayer(columns, rows) {
   const textures = Object.values(biomeTextures).map(name => sprites[name]);
   if (textures.some(asset => !asset?.image) || world.terrain.length !== columns * rows) return null;
@@ -260,7 +244,6 @@ function buildGroundLayer(columns, rows) {
   groundLayerKey = key;
   return layer;
 }
-
 function drawGround() {
   const columns = Math.ceil(world.width / world.cellSize);
   const rows = Math.ceil(world.height / world.cellSize);
@@ -295,11 +278,9 @@ function drawGround() {
     }
   }
 }
-
 function drawGridOverlay() {
   window.GridOverlay.draw(ctx, world, project, camera);
 }
-
 function drawConstructionSites() {
   for (const unit of world.units) {
     if (unit.action?.type !== 'build') continue;
@@ -327,7 +308,6 @@ function drawConstructionSites() {
     ctx.restore();
   }
 }
-
 function spriteForUnit(unit, now) {
   if (unit.state === 'gathering') {
     const kind = String(unit.resourceKind || '');
@@ -352,7 +332,6 @@ function spriteForUnit(unit, now) {
   }
   return sprites.idle;
 }
-
 function fallbackEntity(entity, type, point, scale) {
   ctx.save();
   ctx.translate(point.x, point.y);
@@ -376,13 +355,11 @@ function fallbackEntity(entity, type, point, scale) {
   }
   ctx.restore();
 }
-
 function visibilityAtWorldPosition(x, y) {
   const column = Math.floor(x / world.cellSize);
   const row = Math.floor(y / world.cellSize);
   return world.terrain.find(cell => cell.column === column && cell.row === row)?.visibility || 'unseen';
 }
-
 function drawEntity(item, now) {
   const projected = project(Number(item.data.x) || 0, Number(item.data.y) || 0);
   const point = { x: projected.x + (Number(item.data.screenOffsetX) || 0) * camera.zoom, y: projected.y };
@@ -392,8 +369,7 @@ function drawEntity(item, now) {
   const width = scales[0] * camera.zoom;
   const height = scales[1] * camera.zoom;
   if (point.x < -width || point.x > cssWidth + width || point.y < -height || point.y > cssHeight + height) return;
-
-  const selected = (villager && item.data.id === selectedUnitId)
+  const selected = (villager && selectedUnitIds.has(item.data.id))
     || (item.type === 'building' && item.data.id === selectedBuildingId);
   if (selected) {
     const radius = item.type === 'building' ? 40 : 22;
@@ -408,7 +384,6 @@ function drawEntity(item, now) {
     ctx.lineWidth = Math.max(2, 2.5 * camera.zoom);
     ctx.stroke();
   }
-
   if (hoveredHit?.type === item.type && hoveredHit.data.id === item.data.id) {
     ctx.beginPath();
     ctx.ellipse(point.x, point.y, 29 * camera.zoom, 14 * camera.zoom, 0, 0, Math.PI * 2);
@@ -418,7 +393,6 @@ function drawEntity(item, now) {
     ctx.lineWidth = 2;
     ctx.stroke();
   }
-
   const depletedResource = item.type === 'resource' && Number(item.data.amount) <= 0;
   let asset;
   if (villager) asset = spriteForUnit(item.data, now);
@@ -451,7 +425,6 @@ function drawEntity(item, now) {
     fallbackEntity(item.data, item.type, point, camera.zoom);
   }
   ctx.restore();
-
   const activeJob = item.type === 'building' ? (item.data.job || item.data.production) : null;
   if (activeJob) {
     const duration = activeJob.type === 'research' ? 8 : 6;
@@ -462,7 +435,6 @@ function drawEntity(item, now) {
     ctx.fillStyle = '#e8bd51';
     ctx.fillRect(point.x - barWidth / 2, point.y + 15 * camera.zoom, barWidth * progress, 6 * camera.zoom);
   }
-
   if (depletedResource) return;
   hits.push({
     type: item.type,
@@ -473,7 +445,6 @@ function drawEntity(item, now) {
     bottom: point.y + height * 0.08
   });
 }
-
 function render(now) {
   requestAnimationFrame(render);
   world = snapshotBuffer.presentation(now) || authoritativeWorld;
@@ -487,36 +458,38 @@ function render(now) {
   drawConstructionSites();
   hits.length = 0;
   ActivityPresentation.entities(world).forEach(item => drawEntity(item, now));
+  if (selectionRectangle) {
+    const rectangle = SelectionControls.normalizedRectangle(selectionRectangle.start, selectionRectangle.end);
+    ctx.fillStyle = '#f6c74a26';
+    ctx.fillRect(rectangle.left, rectangle.top, rectangle.right - rectangle.left, rectangle.bottom - rectangle.top);
+    ctx.strokeStyle = '#ffe073';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rectangle.left, rectangle.top, rectangle.right - rectangle.left, rectangle.bottom - rectangle.top);
+  }
   positionBuildingPopover();
   if (mousePosition) updateCursor(mousePosition.x, mousePosition.y);
 }
-
 function showToast(message) {
   window.clearTimeout(toastTimer);
   toast.textContent = message;
   toast.classList.add('visible');
   toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200);
 }
-
 function selectedUnit() {
-  return authoritativeWorld.units.find(unit => unit.id === selectedUnitId) || null;
+  return authoritativeWorld.units.find(unit => selectedUnitIds.has(unit.id)) || null;
 }
-
 function resolveSelectedBuilding(buildings, selectedId, visibilityAt) {
   const building = buildings.find(item => item.id === selectedId) || null;
   if (!building || visibilityAt(Number(building.x) || 0, Number(building.y) || 0) !== 'visible') return null;
   return building;
 }
-
 function selectedBuilding() {
   return resolveSelectedBuilding(authoritativeWorld.buildings, selectedBuildingId, visibilityAtWorldPosition);
 }
-
 function capabilityId(value) {
   if (typeof value === 'string') return value;
   return value?.id || value?.kind || value?.product || value?.technology || '';
 }
-
 function buildingCapabilityView(building) {
   const list = value => Array.isArray(value) ? value.map(capabilityId).filter(Boolean) : [];
   const products = list(building?.produces);
@@ -534,11 +507,9 @@ function buildingCapabilityView(building) {
   const fraction = Number.isFinite(explicit) ? (explicit > 1 ? explicit / 100 : explicit) : (duration > 0 ? elapsed / duration : 0);
   return { products, researches, researched, job: { type, subject, progress: Math.max(0, Math.min(1, fraction)) } };
 }
-
 function capabilityLabel(value) {
   return String(value || 'task').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
-
 function positionBuildingPopover() {
   const building = selectedBuilding();
   if (!building) {
@@ -550,7 +521,6 @@ function positionBuildingPopover() {
   buildingPopover.style.left = `${anchor.x}px`;
   buildingPopover.style.top = `${anchor.y}px`;
 }
-
 function updateBuildingPopover(building) {
   buildingPopover.hidden = !building;
   if (!building) return;
@@ -587,7 +557,6 @@ function updateBuildingPopover(building) {
   trainButton.title = job ? 'Town center is already busy' : world.food < 50 ? 'Train villager (50 food required)' : 'Train villager (50 food)';
   positionBuildingPopover();
 }
-
 function updateHud() {
   tickValue.textContent = String(tick);
   woodValue.textContent = String(Math.floor(world.wood ?? 0));
@@ -598,13 +567,22 @@ function updateHud() {
   clayValue.textContent = String(Math.floor(world.clay ?? 0));
   fiberValue.textContent = String(Math.floor(world.fiber ?? 0));
   for (const button of speedControls.querySelectorAll('button')) button.classList.toggle('active', Number(button.dataset.speed) === world.simulationSpeed);
+  selectedUnitIds = SelectionControls.reconcile(selectedUnitIds, authoritativeWorld.units);
   const unit = selectedUnit();
   const building = selectedBuilding();
-  if (!unit) selectedUnitId = null;
   if (!building) selectedBuildingId = null;
   buildButton.disabled = !unit;
   updateBuildingPopover(building);
-
+  if (selectedUnitIds.size > 1) {
+    selection.className = '';
+    selection.replaceChildren();
+    const name = document.createElement('strong');
+    name.textContent = `${selectedUnitIds.size} villagers selected`;
+    const status = document.createElement('span');
+    status.textContent = 'Tap ground to move group · tap villagers to add or remove on touch';
+    selection.append(name, status);
+    return;
+  }
   if (unit) {
     selection.className = '';
     selection.replaceChildren();
@@ -616,7 +594,6 @@ function updateHud() {
     selection.append(name, status);
     return;
   }
-
   if (building) {
     if (buildMode) cancelBuild();
     selection.className = '';
@@ -628,12 +605,10 @@ function updateHud() {
     selection.append(name, status);
     return;
   }
-
   selection.className = 'empty';
   selection.textContent = 'Tap a villager or town center';
   if (buildMode) cancelBuild();
 }
-
 function setBuildMode(enabled) {
   buildMode = enabled && Boolean(selectedUnit());
   buildButton.classList.toggle('active', buildMode);
@@ -641,11 +616,9 @@ function setBuildMode(enabled) {
   placementHint.classList.toggle('visible', buildMode);
   updateCursor();
 }
-
 function cancelBuild() {
   setBuildMode(false);
 }
-
 function sendCommand(command) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     showToast('Not connected');
@@ -655,7 +628,6 @@ function sendCommand(command) {
   ws.send(JSON.stringify({ type: 'command', request_id: requestId, command }));
   return true;
 }
-
 function hitAt(x, y) {
   for (let i = hits.length - 1; i >= 0; i -= 1) {
     const hit = hits[i];
@@ -663,7 +635,6 @@ function hitAt(x, y) {
   }
   return null;
 }
-
 function updateCursor(x, y) {
   if (Number.isFinite(x) && Number.isFinite(y)) {
     mousePosition = { x, y };
@@ -673,8 +644,7 @@ function updateCursor(x, y) {
   else if (laptopModeQuery.matches && (['unit', 'activity', 'resource', 'building'].includes(hoveredHit?.type) || selectedUnit())) canvas.style.cursor = 'pointer';
   else canvas.style.cursor = laptopModeQuery.matches ? 'grab' : '';
 }
-
-function handleTap(x, y) {
+function handleTap(x, y, additive = false) {
   const hit = hitAt(x, y);
   if (buildMode) {
     const ground = screenToWorld(x, y);
@@ -696,7 +666,8 @@ function handleTap(x, y) {
     if (!unit) return;
     const ground = screenToWorld(x, y);
     if (ground.x < 0 || ground.y < 0 || ground.x > world.width || ground.y > world.height) return;
-    sendCommand({ type: 'move', unit_id: unit.id, x: ground.x, y: ground.y });
+    if (selectedUnitIds.size > 1) sendCommand({ type: 'group_move', unit_ids: [...selectedUnitIds], x: ground.x, y: ground.y });
+    else sendCommand({ type: 'move', unit_id: unit.id, x: ground.x, y: ground.y });
     return;
   }
   if (hit.type === 'activity') {
@@ -705,12 +676,12 @@ function handleTap(x, y) {
     if (unit?.state === 'idle' && resource && unit.id !== hit.data.id) {
       sendCommand({ type: 'gather', unit_id: unit.id, resource_id: resource.id });
     } else {
-      selectedUnitId = hit.data.id;
+      selectedUnitIds = SelectionControls.update(selectedUnitIds, hit.data.id, additive);
       selectedBuildingId = null;
       updateHud();
     }
   } else if (hit.type === 'unit') {
-    selectedUnitId = hit.data.id;
+    selectedUnitIds = SelectionControls.update(selectedUnitIds, hit.data.id, additive);
     selectedBuildingId = null;
     updateHud();
   } else if (hit.type === 'resource') {
@@ -720,20 +691,17 @@ function handleTap(x, y) {
     else showToast('Select an agent first');
   } else if (hit.type === 'building') {
     selectedBuildingId = hit.data.id;
-    selectedUnitId = null;
+    selectedUnitIds.clear();
     cancelBuild();
     updateHud();
   }
 }
-
 function pointerDistance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
-
 function pointerMidpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
-
 function beginPinch() {
   const pair = [...pointers.values()].slice(0, 2);
   const middle = pointerMidpoint(pair[0], pair[1]);
@@ -744,16 +712,15 @@ function beginPinch() {
   };
   gestureUsed = true;
 }
-
 function onPointerDown(event) {
   if (event.pointerType === 'mouse' && event.button !== 0) return;
   event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
-  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, dragging: false });
+  const mouseBox = event.pointerType === 'mouse' && !hitAt(event.clientX, event.clientY) && !buildMode;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, dragging: false, mouseBox, additive: event.shiftKey || event.pointerType === 'touch' });
   if (pointers.size === 1) gestureUsed = false;
   if (pointers.size === 2) beginPinch();
 }
-
 function onPointerMove(event) {
   const pointer = pointers.get(event.pointerId);
   if (!pointer) {
@@ -775,7 +742,10 @@ function onPointerMove(event) {
   } else {
     const moved = Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
     if (moved > DRAG_THRESHOLD) pointer.dragging = true;
-    if (pointer.dragging) {
+    if (pointer.dragging && pointer.mouseBox) {
+      selectionRectangle = { start: { x: pointer.startX, y: pointer.startY }, end: { x: pointer.x, y: pointer.y } };
+      gestureUsed = true;
+    } else if (pointer.dragging) {
       camera.x -= (pointer.x - pointer.lastX) / camera.zoom;
       camera.y -= (pointer.y - pointer.lastY) / camera.zoom;
       clampCamera();
@@ -785,21 +755,27 @@ function onPointerMove(event) {
   pointer.lastX = pointer.x;
   pointer.lastY = pointer.y;
 }
-
 function onPointerLeave(event) {
   if (event.pointerType !== 'mouse') return;
   mousePosition = null;
   hoveredHit = null;
   updateCursor();
 }
-
 function finishPointer(event, cancelled) {
   const pointer = pointers.get(event.pointerId);
   if (!pointer) return;
   const wasSingle = pointers.size === 1;
   pointers.delete(event.pointerId);
+  if (!cancelled && pointer.mouseBox && pointer.dragging && selectionRectangle) {
+    const rectangle = SelectionControls.normalizedRectangle(selectionRectangle.start, selectionRectangle.end);
+    const enclosed = SelectionControls.enclosedUnitIds(authoritativeWorld.units, rectangle, project);
+    selectedUnitIds = pointer.additive ? new Set([...selectedUnitIds, ...enclosed]) : new Set(enclosed);
+    selectedBuildingId = null;
+    selectionRectangle = null;
+    updateHud();
+  }
   if (!cancelled && wasSingle && !pointer.dragging && !gestureUsed && Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY) <= DRAG_THRESHOLD) {
-    handleTap(pointer.x, pointer.y);
+    handleTap(pointer.x, pointer.y, pointer.additive);
   }
   if (pointers.size < 2) {
     pinch = null;
@@ -807,7 +783,6 @@ function finishPointer(event, cancelled) {
     if (remaining) remaining.dragging = true;
   }
 }
-
 function zoomAt(x, y, factor) {
   const anchor = screenToRaw(x, y);
   const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom * factor));
@@ -816,15 +791,12 @@ function zoomAt(x, y, factor) {
   camera.y = anchor.y - (y - cssHeight * 0.42) / next;
   clampCamera();
 }
-
 function shortcutTargetIsInteractive(target) {
   return target instanceof Element && Boolean(target.closest('input, textarea, select, button, summary, a[href], [contenteditable], [role="button"], [role="textbox"]'));
 }
-
 function clearPanInput() {
   pressedPanKeys.clear();
 }
-
 function onKeyDown(event) {
   if (!laptopModeQuery.matches || shortcutTargetIsInteractive(event.target) || event.ctrlKey || event.metaKey || event.altKey) {
     clearPanInput();
@@ -841,17 +813,14 @@ function onKeyDown(event) {
     event.preventDefault();
   }
 }
-
 function onKeyUp(event) {
   pressedPanKeys.delete(event.code);
 }
-
 function updateLaptopMode() {
   clearPanInput();
   placementHint.textContent = laptopModeQuery.matches ? 'Click ground to build · Escape to cancel' : 'Tap ground to build · Escape to cancel';
   updateCursor();
 }
-
 function connect() {
   window.clearTimeout(reconnectTimer);
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -932,14 +901,13 @@ function connect() {
     reconnectTimer = window.setTimeout(connect, delay);
   };
 }
-
 async function resetWorld() {
   if (!window.confirm('Reset the entire world? All progress will be lost.')) return;
   resetWorldButton.disabled = true;
   try {
     const response = await fetch('/reset', { method: 'POST' });
     if (!response.ok) throw new Error(await response.text() || `Reset failed (${response.status})`);
-    selectedUnitId = null;
+    selectedUnitIds.clear();
     selectedBuildingId = null;
     cancelBuild();
     updateHud();
@@ -950,7 +918,6 @@ async function resetWorld() {
     resetWorldButton.disabled = false;
   }
 }
-
 buildButton.addEventListener('click', () => setBuildMode(!buildMode));
 trainButton.addEventListener('click', () => {
   const building = selectedBuilding();

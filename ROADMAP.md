@@ -33,7 +33,7 @@ Engineering acceptance:
 
 ## Slice B — Multi-unit control
 
-Status: planned.
+Status: implemented on `feature/multi-unit-control`; not released.
 
 Gameplay acceptance:
 
