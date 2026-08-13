@@ -2,132 +2,131 @@
 
 ## Product principle
 
-Build the smallest convincing RTS loop before expanding the simulation. Each milestone must be playable on a phone and understandable without developer explanation.
+Grow the proven gather/build demo into one compact, coherent RTS scenario. Every slice must add an end-to-end player decision, remain deterministic and authoritative in Rust, preserve fog/collision/persistence rules, and be playable through the real Canvas UI on desktop and phone. Do not build a generic engine, ECS, recipe language, or broad technology matrix.
 
-## Milestone 1 — Gather and Build Vertical Slice
+## Released baseline — Gather, build, research, and route
 
-### World
+- [x] Persisted 600-cell isometric world with eight biomes and explored/visible/unseen fog privacy.
+- [x] Seven biome-compatible raw resources: wood, food, stone, gold, iron, clay, and fiber.
+- [x] Bounded villager carrying, deposits, resumption, depletion, construction, training, and five gathering technologies.
+- [x] Deterministic four-neighbor routing, occupancy, reserved destinations/build sites, and blocked-spawn rejection.
+- [x] Typed sequenced WebSocket commands/snapshots, SQLite round-trip, authoritative 0×/1×/2× speed.
+- [x] Canvas terrain/entity presentation, directional movement/gathering animation, fog memory, capability popover, and desktop/mobile controls.
 
-- Deterministic maximum-size 2400×1600 map, generated once as 600 persisted cells.
-- Eight meaningful, individually connected Voronoi-style biome regions.
-- Persistent explored fog; unit/building sight produces visible, explored-dim, and unseen-dark terrain. Never-seen entities are omitted, while discovered static resources remain as dimmed map memory.
-- Two villagers, initially idle, and one starting town-center base.
-- Deterministically placed wood, food, stone, gold, iron, clay, and fiber nodes, each on a compatible biome and at least 120 world units from every other node.
-- Seven typed shared stockpiles.
-- One buildable building type: town center, with one active production/research slot and typed product and technology sets.
-- No autonomous task selection, random world generation, resource regeneration, combat, health, or LLM behavior.
+## Slice A — Expandable domain foundation
 
-### Simulation
+Status: planned.
 
-- An idle villager does nothing across arbitrary ticks.
-- A move order makes an idle villager walk to valid selected ground and reveal terrain along the route.
-- A gather order makes the villager walk to the selected resource.
-- At the resource, the villager waits and gathers its typed material at two units per second into a bounded 20-unit load.
-- Full and final partial loads return to the nearest town center, deposit exactly once into the matching stockpile, then resume the same order if material remains.
-- When the resource is depleted, the villager becomes idle.
-- A build order validates the selected villager, position, and wood cost.
-- Wood is reserved exactly once when the build order is accepted.
-- The villager walks to the site and visibly constructs for four seconds.
-- The building appears exactly once after construction finishes.
-- The villager becomes idle afterward.
-- Busy villagers reject replacement orders for this milestone.
-- A town center can produce one villager at a time from its allowed product set, reserving 50 food exactly once and completing after six seconds.
-- A town center can research Forestry, Agriculture, Masonry, Mining, and Textiles, enforcing prerequisites and reserving 40 food plus 20 wood exactly once; completed research improves matching gather rates by 20%.
+Deliver the smallest explicit catalogs and persisted state needed by later slices.
 
-### Persistence and networking
+Gameplay acceptance:
 
-- Rust owns authoritative state.
-- Full snapshots stream over WebSocket.
-- Commands and command results are typed and include a request ID.
-- SQLite round-trips active orders and completed world state.
-- Every persistence path honors `AGE_OF_AGENTS_DB`.
-- Corrupt saves produce an explicit startup error.
+1. The snapshot exposes a stable catalog of the actual resources, building kinds, unit kinds, recipes, and technologies used by this roadmap; unknown persisted enum values fail explicitly rather than resetting the world.
+2. Existing saves migrate or deserialize with intentional defaults and retain units, stockpiles, orders, buildings, fog, navigation, and research.
+3. Scenario state has an explicit identifier, authoritative tick limit, objective progress, and running/won/lost outcome without yet claiming objectives are playable.
+4. Existing released gameplay remains behaviorally unchanged.
 
-### Frontend
+Engineering acceptance:
 
-- Native Canvas 2D; no Three.js or UI framework.
-- Fixed isometric Canvas tile map with no visible seams and exactly eight production terrain textures.
-- Entities draw in stable ground-depth order.
-- Tap/click selects a villager.
-- With a villager selected, tap/click empty ground to move.
-- Tap/click any visible resource to gather. During the gathering phase, one combined resource-specific villager activity replaces the separate unit and node rendering for each assigned villager; 1:n villager-to-node assignments remain commandable.
-- Tap/click a town center to train one villager or research one available technology at a time.
-- Rendering runs independently of network arrival and interpolates only compatible authoritative movement snapshots without extrapolation.
-- Equal-depth villagers render above resources, out-of-world canvas uses the unseen-fog color, and 0×/1×/2× buttons control authoritative simulation speed.
-- Build image button enters placement mode; tap/click ground to build.
-- Drag pans; wheel/pinch zooms.
-- Touch targets are at least 48×48 CSS pixels and respect mobile safe areas.
-- Thin top resource row, selected-unit status, bottom command dock, and an anchored selected-building capability popover.
-- No minimap, event chronicle, full agent list, or desktop-only controls.
+- Split `game.rs` before it or any frontend file grows beyond 1,000 lines; catalogs are direct typed constants/data, not a generic content engine.
+- Focused migration, catalog-integrity, serialization, and deterministic tick-boundary regressions pass.
 
-### Asset contract
+## Slice B — Multi-unit control
 
-All production sprites must be:
+Status: planned.
 
-- Real 8-bit sRGB RGBA PNG files, not JPEG data with `.png` extensions.
-- Tightly framed with transparent corners/margins.
-- Free of opaque cream/gray matte rectangles and JPEG halos.
-- Edge-color-dilated beneath transparency to prevent fringes.
-- Drawn from one fixed three-quarter isometric view with upper-left lighting.
-- Readable at actual runtime size.
+Gameplay acceptance:
 
-Required set:
+1. Mouse drag from empty ground draws a readable selection rectangle and selects all visible friendly units whose projected feet are enclosed; click selection still works.
+2. Touch keeps pan/tap semantics and offers additive unit selection without accidental box selection.
+3. A group ground order is one typed authoritative command. Validation is atomic: one invalid/busy/member mismatch rejects the whole order without moving any unit.
+4. Accepted group movement assigns deterministic distinct reachable destinations, respects reservations/occupancy, and visibly moves every selected unit without stacking.
+5. The HUD reports the selected count and group orders survive snapshots/reconnects.
 
-| Asset | Source | Runtime | Anchor |
-|---|---:|---:|---|
-| `agent_idle.png` | 256×256 | 40×40 | feet at `(0.5, 0.875)` |
-| `agent_walk_01.png` | 256×256 | 40×40 | same baseline and identity |
-| `agent_walk_02.png` | 256×256 | 40×40 | same baseline and identity |
-| six directional walk frames | 256×256 | 40×40 | diagonal-toward, down-front, and up-back two-frame cycles |
-| 14 resource-specific gather frames | 256×256 | 40×40 | two frames each for seven resource kinds |
-| `agent_build.png` | 256×256 | 40×40 | same baseline and identity |
-| `resource_tree.png` | 256×256 | 35×35 | trunk bottom-center |
-| `resource_berries.png` | 256×256 | 35×35 | bush bottom-center |
-| `resource_stone.png` | 256×256 | 35×35 | outcrop bottom-center |
-| `building_town_center.png` | 512×512 | 80×80 | footprint bottom-center |
-| eight biome terrain textures | 96×96 | renderer-defined | seamless square source |
-| build/cancel controls | 128×128 | 48×48 minimum | centered icon |
+## Slice C — Steel economy vertical slice
 
-Animation gates:
+Status: planned.
 
-- Agent baselines differ by no more than one source pixel.
-- Character height differs by no more than 3% between frames.
-- Frame changes show movement, not identity, camera, costume, or scale changes.
+Gameplay acceptance:
 
-### Milestone 1 definition of done
+1. Coal appears only in compatible terrain and is extracted by villagers only after a Mining Camp is constructed beside it.
+2. Iron extraction also requires a Mining Camp; legacy iron remains discoverable but cannot be hand-gathered.
+3. A Smelter/Forge can queue steel batches; each batch atomically reserves iron plus coal, progresses visibly, and deposits steel exactly once.
+4. Invalid placement, missing inputs, occupied job slots, and inaccessible spawn/interaction cells reject without partial cost/input mutation.
+5. The building popover and stockpile HUD make prerequisites, costs, queue progress, blocked reasons, coal, and steel understandable.
 
-- All Rust tests pass.
-- Clippy passes with warnings denied.
-- Frontend JavaScript syntax check passes.
-- Browser flow is manually verified on desktop and a phone-sized viewport.
-- State survives a server restart using a non-default SQLite path.
-- Thermonuclear review has no unresolved blockers.
-- `master` is pushed and the Modal URL serves the verified build.
+## Slice D — Coherent broader economy and progression
 
-## Milestone 2 — RTS Feel
+Status: planned.
 
-Only after Milestone 1 is stable:
+Target economy (13 total resources/products): wood, food, stone, gold, iron ore, coal, clay, fiber, timber, steel, bricks, cloth, and rations.
 
-- [x] Grid-aware occupancy collision and deterministic four-neighbor routing for movement, gathering, deposits, construction, reserved build sites, and villager spawning.
-- Building placement validity and occupancy.
-- Dedicated visible carried-load sprites if they improve clarity beyond the delivered cargo status and gathering cycles.
-- More coherent terrain variants and transitions.
-- One additional building or resource only if it deepens the loop.
-- Audio feedback and tactile mobile interaction polish.
+Gameplay acceptance:
 
-## Milestone 3 — Strategy
+1. Extraction buildings are limited to Mining Camp (iron/coal/gold/stone) and Farm (food/fiber); villagers still directly gather wood and clay.
+2. Lumber Mill makes timber from wood; Smelter makes steel from iron+coal; Kiln makes bricks from clay+wood; Weaver makes cloth from fiber; Kitchen makes rations from food.
+3. Town Center, Mining Camp, Farm, Lumber Mill, Smelter, Kiln, Weaver, Kitchen, Barracks, Range, Workshop, Infirmary, Watchtower, and Monument form the complete useful building roster. Buildings not yet active in combat may appear only in the slice that makes them useful.
+4. Building upgrades are bounded to two levels and improve one visible property. Research remains building-specific and every technology enables or improves an immediately playable action.
+5. Costs, one-job-slot queues, prerequisites, progress, and completion are authoritative, persisted, and visible. No giant recipe/technology matrix.
 
-- Population and production.
-- One military unit and one enemy target.
-- Basic combat.
-- Additional strategic fog rules (enemy vision and scouting); terrain exploration is delivered in Milestone 1.
-- Scenario win/lose condition.
+## Slice E — Bounded scenarios
+
+Status: planned.
+
+Deliver four selectable deterministic challenges, each with visible progress, a tick/time limit, and terminal won/lost state:
+
+1. Foundry Town: construct a Smelter and hold 20 steel.
+2. Frontier Survey: reveal at least 70% of terrain and construct a Watchtower before the limit.
+3. Monument Works: construct the Monument using timber, bricks, cloth, gold, and steel.
+4. Hold the Coast: survive the raid schedule until the final tick with the Town Center alive (enabled with Slice G).
+
+A combined default prototype scenario requires steel production, exploration, and survival. Terminal scenarios reject further simulation-changing commands except reset/select-scenario. HUD presents objective progress and remaining authoritative time.
+
+## Slice F — Combat foundation
+
+Status: planned.
+
+Gameplay acceptance:
+
+1. Units/buildings have faction and health; snapshots omit unseen hostiles under existing fog privacy.
+2. Barracks trains melee Guards; Range trains Archers. Group attack/target commands validate ownership, visibility, range/path viability, and members atomically.
+3. Guards close to melee range; Archers hold bounded range. Attack cadence, damage, target loss, and death cleanup are deterministic.
+4. Dead units release occupied/reserved cells and are removed from selection/orders/persistence exactly once.
+5. The player can train, select, group-order, fight, and win a small deterministic skirmish through the real UI.
+
+## Slice G — Defense, support, siege, and raids
+
+Status: planned.
+
+Gameplay acceptance:
+
+1. Infirmary trains a Healer that restores friendly health without exceeding maximum health and cannot heal hostiles or dead targets.
+2. Workshop trains a slow Siege Cart with bonus structure damage; blocked production spawns reject atomically.
+3. Watchtowers automatically attack visible hostile units in range with deterministic cadence and target choice.
+4. Pirate raids use a seeded fixed schedule plus bounded deterministic interval jitter, spawn at valid coastal/edge cells, and pursue explicit scenario targets.
+5. Raid warnings, current wave, losses, and survive progress are visible. The player can build defenses, position a mixed group, survive, and complete Hold the Coast.
+
+## Slice H — Balance and release polish
+
+Status: planned.
+
+Gameplay acceptance:
+
+1. Starting resources and timings let a new run reach steel, field a mixed defense, and finish the default scenario in a bounded play session without developer shortcuts.
+2. Desktop and phone controls remain legible; selection, commands, queue state, scenario progress, combat feedback, and raids have clear visual feedback without frontend emojis.
+3. New sprites follow the established hand-drawn cel-shaded dark-ink direction, are valid sRGB RGBA PNGs, and share verified ground anchors.
+4. README documents the actual playable loop and controls; this roadmap marks only production-verified slices delivered.
+
+## Gate for every released slice
+
+1. Focused Rust regressions for every domain rule and bounded transition.
+2. `cargo fmt --check`, `cargo test`, and `cargo clippy --all-targets --all-features -- -D warnings`.
+3. Frontend syntax plus focused presentation/control contract checks; Python asset checks; `git diff --check`.
+4. Independent specification review, code-quality review, and thermonuclear maintainability review with all blockers fixed.
+5. Real isolated local server plus Chromium: use actual controls/WebSocket, inspect intermediate authoritative state, browser console, desktop and phone screenshots, and play the delivered loop.
+6. Push `master`, observe CI, deploy through `python3 scripts/modal_manage.py`, then verify production assets byte-for-byte, state/protocol, hard-reloaded Chromium interactions/screenshots, and restoration of reversible controls.
+7. Refresh `OPEN_WORK.md`, README, and this roadmap so committed, pushed, deployed, and production-verified states are never conflated.
 
 ## Explicitly deferred
 
-- LLM-driven agents or autonomous planning.
-- Multiplayer.
-- General ECS or reusable engine framework.
-- Large tech trees or economy matrices.
-- Procedural world generation.
-- Modding/plugin systems.
+- LLM-controlled villagers, autonomous planning, multiplayer, mod/plugin APIs, generic ECS/content engines, procedural world generation, and a large branching tech tree.
