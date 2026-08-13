@@ -15,13 +15,27 @@ assert.deepEqual([...controls.update(new Set(['a']), 'b', true)], ['a', 'b']);
 assert.deepEqual([...controls.update(new Set(['a', 'b']), 'a', true)], ['b']);
 assert.deepEqual([...controls.update(new Set(['a']), 'b', false)], ['b']);
 
+function pointerSequence(pointerType, shiftKey, points, cancelled = false) {
+  const pointer = controls.beginPointer(pointerType, shiftKey, true, false, points[0].x, points[0].y);
+  const modes = points.slice(1).map(point => controls.movePointer(pointer, point.x, point.y, 8));
+  return { pointer, modes, result: controls.finishPointer(pointer, cancelled, 8) };
+}
+assert.deepEqual(pointerSequence('mouse', false, [{ x: 10, y: 10 }, { x: 30, y: 30 }]).modes, ['pan']);
+assert.equal(pointerSequence('mouse', true, [{ x: 10, y: 10 }, { x: 30, y: 30 }]).result, 'box');
+assert.equal(pointerSequence('touch', false, [{ x: 10, y: 10 }]).result, 'tap');
+assert.equal(pointerSequence('touch', false, [{ x: 10, y: 10 }, { x: 30, y: 30 }]).result, 'pan');
+assert.equal(pointerSequence('mouse', true, [{ x: 10, y: 10 }, { x: 30, y: 30 }], true).result, 'cancel');
+assert.equal(controls.beginPointer('touch', false, true, false, 0, 0).additive, true);
+assert.equal(controls.beginPointer('mouse', false, true, false, 0, 0).additive, false);
+
 const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'frontend/app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'frontend/index.html'), 'utf8');
 assert.match(html, /selection-controls\.js/, 'selection helpers load before app');
-assert.match(app, /pointerType === 'mouse'[\s\S]*const mouseBox/, 'only mouse starts box selection');
-assert.match(app, /pointerType === 'touch'/, 'touch taps use explicit additive selection');
+assert.match(app, /SelectionControls\.beginPointer/, 'pointer sequences use the tested gesture state machine');
+assert.match(app, /SelectionControls\.finishPointer/, 'pointer completion uses the tested gesture state machine');
+assert.match(app, /selectionRectangle = null;[\s\S]*result === 'tap'/, 'pointer completion and cancellation clear box preview before tap handling');
 assert.match(app, /type: 'group_move', unit_ids: \[\.\.\.selectedUnitIds\]/, 'selected collection issues one group command');
 assert.match(app, /SelectionControls\.reconcile/, 'snapshots remove stale selected IDs');
 assert.match(app, /villagers selected/, 'HUD reports selected count');
-console.log('PASS selection rectangle, additive touch selection, stale cleanup, HUD, and group command contracts');
+console.log('PASS mouse pan, Shift-box, touch tap/pan/additive, cancellation, stale cleanup, HUD, and group command contracts');

@@ -41,6 +41,7 @@ def verify_once() -> None:
     comparisons = {
         "/": ROOT / "frontend/index.html",
         "/frontend/app.js": ROOT / "frontend/app.js",
+        "/frontend/selection-controls.js": ROOT / "frontend/selection-controls.js",
         "/frontend/snapshot-buffer.js": ROOT / "frontend/snapshot-buffer.js",
         "/frontend/activity-presentation.js": ROOT / "frontend/activity-presentation.js",
         **{
