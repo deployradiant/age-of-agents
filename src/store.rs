@@ -185,6 +185,58 @@ mod tests {
     }
 
     #[test]
+    fn current_save_without_slice_a_fields_loads_with_intentional_defaults() {
+        let path = temporary_db("slice-a-defaults");
+        let store = Store::from_path(&path);
+        store.initialize().unwrap();
+        let original = GameWorld::default();
+        let mut legacy = serde_json::to_value(&original).unwrap();
+        let object = legacy.as_object_mut().unwrap();
+        object.remove("scenario");
+        for unit in object["units"].as_array_mut().unwrap() {
+            unit.as_object_mut().unwrap().remove("kind");
+        }
+        for field in ["coal", "timber", "steel", "bricks", "cloth", "rations"] {
+            object["stockpile"].as_object_mut().unwrap().remove(field);
+        }
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO world_state (id, world_json) VALUES (1, ?1)",
+                params![serde_json::to_string(&legacy).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let loaded = store.load().unwrap().unwrap();
+        assert_eq!(loaded, original);
+        assert_eq!(loaded.units[0].kind, crate::game::UnitKind::Villager);
+        assert_eq!(loaded.scenario, crate::game::ScenarioState::default());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn unknown_persisted_enum_value_is_an_explicit_load_error() {
+        let path = temporary_db("unknown-enum");
+        let store = Store::from_path(&path);
+        store.initialize().unwrap();
+        let mut value = serde_json::to_value(GameWorld::default()).unwrap();
+        value["resources"][0]["kind"] = serde_json::Value::String("unobtainium".into());
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO world_state (id, world_json) VALUES (1, ?1)",
+                params![serde_json::to_string(&value).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let error = store.load().unwrap_err().to_string();
+        assert!(error.contains("unknown variant `unobtainium`"), "{error}");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn legacy_schema_is_migrated_to_an_empty_current_store() {
         let path = temporary_db("legacy");
         let connection = Connection::open(&path).unwrap();
