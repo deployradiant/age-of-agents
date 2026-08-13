@@ -36,13 +36,17 @@
     gesture(pointerType, shiftKey, emptyGround, buildMode) {
       return {
         box: pointerType === 'mouse' && shiftKey && emptyGround && !buildMode,
-        additive: pointerType === 'touch' || shiftKey
+        additive: shiftKey
       };
+    },
+
+    additiveTap(pointerType, shiftKey, heldMilliseconds) {
+      return shiftKey || (pointerType === 'touch' && heldMilliseconds >= 450);
     },
 
     beginPointer(pointerType, shiftKey, emptyGround, buildMode, x, y) {
       const mode = this.gesture(pointerType, shiftKey, emptyGround, buildMode);
-      return { x, y, startX: x, startY: y, lastX: x, lastY: y, dragging: false, mouseBox: mode.box, additive: mode.additive };
+      return { x, y, startX: x, startY: y, lastX: x, lastY: y, dragging: false, mouseBox: mode.box, additive: mode.additive, pointerType, shiftKey, startedAt: Date.now() };
     },
 
     movePointer(pointer, x, y, threshold) {
