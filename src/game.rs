@@ -81,6 +81,11 @@ pub enum Command {
         x: f64,
         y: f64,
     },
+    GroupMove {
+        unit_ids: Vec<String>,
+        x: f64,
+        y: f64,
+    },
     Gather {
         unit_id: String,
         resource_id: String,
@@ -106,6 +111,8 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandError {
     UnitNotFound,
+    EmptyUnitGroup,
+    DuplicateUnit,
     ResourceNotFound,
     ResourceDepleted,
     UnitBusy,
@@ -129,6 +136,8 @@ impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::UnitNotFound => "unit not found",
+            Self::EmptyUnitGroup => "unit group is empty",
+            Self::DuplicateUnit => "unit group contains a duplicate member",
             Self::ResourceNotFound => "resource not found",
             Self::ResourceDepleted => "resource is depleted",
             Self::UnitBusy => "unit is busy",
@@ -335,6 +344,33 @@ impl GameWorld {
                 let target = Position { x, y };
                 self.route_exists_to_free_cell(unit_index, target)?;
                 self.units[unit_index].action = UnitAction::Move { x, y };
+                Ok(())
+            }
+            Command::GroupMove { unit_ids, x, y } => {
+                if !self.contains_position(x, y) {
+                    return Err(CommandError::InvalidDestination);
+                }
+                if unit_ids.is_empty() {
+                    return Err(CommandError::EmptyUnitGroup);
+                }
+                let mut seen = BTreeSet::new();
+                let mut members = Vec::with_capacity(unit_ids.len());
+                for unit_id in unit_ids {
+                    if !seen.insert(unit_id.clone()) {
+                        return Err(CommandError::DuplicateUnit);
+                    }
+                    members.push((unit_id.clone(), self.unit_index_and_idle(&unit_id)?));
+                }
+                members.sort_by(|left, right| left.0.cmp(&right.0));
+                let member_indices: Vec<_> = members.iter().map(|(_, index)| *index).collect();
+                let assignments =
+                    self.group_move_assignments(&member_indices, Position { x, y })?;
+                for (unit_index, destination) in assignments {
+                    self.units[unit_index].action = UnitAction::Move {
+                        x: destination.x,
+                        y: destination.y,
+                    };
+                }
                 Ok(())
             }
             Command::Gather {

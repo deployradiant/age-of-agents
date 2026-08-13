@@ -346,6 +346,16 @@ mod tests {
     }
 
     #[test]
+    fn group_move_is_one_typed_command() {
+        let message: ClientMessage = serde_json::from_str(
+            r#"{"type":"command","request_id":"group-1","command":{"type":"group_move","unit_ids":["villager-1","villager-2"],"x":400,"y":500}}"#,
+        ).unwrap();
+        assert!(matches!(message, ClientMessage::Command {
+            command: Command::GroupMove { unit_ids, .. }, ..
+        } if unit_ids.len() == 2));
+    }
+
+    #[test]
     fn snapshots_serialize_typed_visibility_without_unseen_entities() {
         let world = GameWorld::default();
         let message = ServerMessage::snapshot(4, &world);

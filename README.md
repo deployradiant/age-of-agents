@@ -64,8 +64,8 @@ AGE_OF_AGENTS_DB=/tmp/age-of-agents.db cargo run
 
 ## Controls
 
-- **Select:** tap/click a villager or town center.
-- **Move:** with a villager selected, tap/click empty ground.
+- **Select:** tap/click a villager; touch taps add or remove villagers from the current selection. On desktop, drag from empty ground to box-select visible villagers, or Shift-click to add/remove. Tap/click a town center to select it instead.
+- **Move:** with one or more villagers selected, tap/click empty ground. Groups receive one atomic authoritative order and spread across distinct reachable cells.
 - **Gather:** with a villager selected, tap/click a resource or an active combined gathering animation. Villagers gather two units per second, wait for a full 20-unit load unless the node depletes, deposit at the nearest town center, and resume until depletion.
 - **Build:** select a villager, press the build button, then tap/click valid ground.
 - **Produce:** select a town center and press **Train Villager** in its anchored capability popover. It reserves 50 food and produces one villager over six seconds; each building has one active production slot.

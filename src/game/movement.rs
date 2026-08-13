@@ -11,10 +11,10 @@ impl GameWorld {
         }
     }
 
-    fn occupied_cells(&self, moving_unit: Option<usize>) -> BTreeSet<CellCoordinate> {
+    fn occupied_cells_except(&self, moving_units: &BTreeSet<usize>) -> BTreeSet<CellCoordinate> {
         let mut occupied = BTreeSet::new();
         for (index, unit) in self.units.iter().enumerate() {
-            if Some(index) != moving_unit {
+            if !moving_units.contains(&index) {
                 occupied.extend(self.cell_for_position(unit.position));
                 if let UnitAction::Move { x, y } = unit.action {
                     occupied.extend(self.cell_for_position(Position { x, y }));
@@ -36,6 +36,46 @@ impl GameWorld {
                 .filter_map(|building| self.cell_for_position(building.position)),
         );
         occupied
+    }
+
+    fn occupied_cells(&self, moving_unit: Option<usize>) -> BTreeSet<CellCoordinate> {
+        self.occupied_cells_except(&moving_unit.into_iter().collect())
+    }
+
+    pub(super) fn group_move_assignments(
+        &self,
+        unit_indices: &[usize],
+        target: Position,
+    ) -> Result<Vec<(usize, Position)>, CommandError> {
+        let target_cell = self
+            .cell_for_position(target)
+            .ok_or(CommandError::InvalidDestination)?;
+        let moving_units: BTreeSet<_> = unit_indices.iter().copied().collect();
+        let mut blocked = self.occupied_cells_except(&moving_units);
+        let mut candidates: Vec<_> = self.terrain.iter().map(|cell| cell.coordinate()).collect();
+        candidates.sort_by_key(|cell| {
+            (
+                cell.column.abs_diff(target_cell.column) + cell.row.abs_diff(target_cell.row),
+                *cell,
+            )
+        });
+        let mut assignments = Vec::with_capacity(unit_indices.len());
+        for &unit_index in unit_indices {
+            let destination_cell = candidates
+                .iter()
+                .copied()
+                .filter(|cell| !blocked.contains(cell))
+                .find(|cell| self.route(unit_index, *cell, &blocked).is_some())
+                .ok_or(CommandError::TargetUnreachable)?;
+            blocked.insert(destination_cell);
+            let destination = if destination_cell == target_cell {
+                target
+            } else {
+                self.cell_center(destination_cell)
+            };
+            assignments.push((unit_index, destination));
+        }
+        Ok(assignments)
     }
 
     fn route(
