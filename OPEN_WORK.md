@@ -1,38 +1,38 @@
 # Open Work
 
-**Last updated:** 2026-08-13T04:54:00Z
+**Last updated:** 2026-08-13T18:43:00Z
 **Branch:** `master`
-**Base commit:** `7e46ecd`
-**Overall status:** In progress — Slices A and B integrated locally; release gate running
+**Base commit:** `f46ee17`
+**Overall status:** In progress — Slices A+B pushed; local browser and production release gates active
 
 ## Current goal
 
-Turn the released gather/build demo into one coherent playable RTS prototype with multi-unit control, a 13-resource production economy, bounded scenarios, combat roles, defenses, and deterministic pirate raids.
+Release the integrated expandable domain foundation and multi-unit controls, then continue with a steel economy vertical slice plus one low-overlap roadmap lane.
 
 ## Completed in the working tree
 
-- Slice A integrated as `4583b10` + `0a51d63`: static explicit 13-resource/14-building/5-unit catalogs, five direct recipes, persisted scenario state, compatibility/error regressions, and domain/test decomposition below file limits.
-- Slice B integrated as `c52a631` + `e9d0ec7` + `7e46ecd`: Shift-drag box selection while preserving pan, ordinary touch replace plus explicit long-press additive selection, one atomic typed group move, deterministic distinct destinations, intermediate collision regression, CI/deployment parity.
-- PR #6 reached independent APPROVED at feature head `af6a3fb` after its fix loop.
-- PR #7 passed its broad review except touch replace semantics; narrow final approval of `c6d0d79` is pending while parent verification runs.
+- `master` and `origin/master` both point to `f46ee17`; the primary checkout was clean when this checkpoint was refreshed.
+- Slice A is integrated: explicit 13-resource/14-building/5-unit catalogs, five recipes, scenario state, save migration, and regressions.
+- Slice B is integrated: Shift-box selection, explicit touch long-press additive selection, atomic typed group move, deterministic distinct destinations, and collision regressions.
+- PR #6 (`af6a3fb`) and PR #7 (`c6d0d79`) remain open for audit only. Their reviewed work was integrated directly; neither PR was merged.
 
 ## Verification completed
 
-- Slice A isolated: 52 Rust tests passed; strict Clippy and diff checks passed; all source files under 1,000 lines.
-- Slice B isolated: 50 Rust tests passed; strict Clippy; all Node/Python/asset checks passed; fixed-step group movement asserted no occupied-cell overlap on every sampled tick.
-- Parent verified PR/branch SHAs and cherry-picked commits directly; neither agent merged.
+- `cargo fmt --check && cargo test && cargo clippy --all-targets --all-features -- -D warnings` — formatting and strict Clippy passed; 56/56 Rust tests passed at `f46ee17`.
+- GitHub Actions run `31731879535` for `f46ee17`: quality job passed; deploy job was still running at this checkpoint.
+- Cache-bypassed production `/state` already exposes the integrated 13-key stockpile and scenario/catalog shape.
 
 ## Open work
 
-1. Complete the integrated full gate and final PR #7 approval.
-2. Run real isolated local server + direct Chromium/CDP desktop and phone gameplay for selection/group movement, with console inspection and screenshots.
-3. Push/deploy Slices A+B and production-verify assets/protocol/browser play.
-4. Continue immediately with steel economy and subsequent slices.
+1. Fix the production verifier's stale seven-resource assertion, which now rejects the correct 13-resource Slice A state.
+2. Complete real isolated local Chromium gameplay: Shift-box two villagers, issue one group move, sample intermediate authoritative movement, inspect console, and capture desktop plus phone screenshots.
+3. Resolve final audit reviews, push the verifier fix, wait for CI/deploy, hard-reload, and repeat hands-on production verification.
+4. Implement and gate steel economy plus one low-overlap roadmap lane in isolated delegated worktrees.
 
 ## Blockers
 
-None external. Browser tool daemon is unhealthy; direct Chromium/CDP or DISPLAY=:10 X11 is required.
+None external. The current deployment verifier is internally stale: `scripts/modal_manage.py` still requires exactly seven stockpile keys even though Slice A intentionally exposes thirteen.
 
 ## Exact next action
 
-Finish the running integrated gate, then execute the real Chromium selection/group-order harness before push/deploy.
+Update the verifier to the explicit 13-resource contract, run its checks, then launch the isolated local server and Chromium interaction harness.

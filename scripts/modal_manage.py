@@ -67,8 +67,23 @@ def verify_once() -> None:
         raise RuntimeError("production leaks biome data for unseen terrain")
     if state.get("simulation_speed") not in (0.0, 1.0, 2.0):
         raise RuntimeError(f"invalid production simulation speed: {state.get('simulation_speed')}")
-    if set(state.get("stockpile", {})) != {"wood", "food", "stone", "gold", "iron", "clay", "fiber"}:
-        raise RuntimeError("production stockpile does not expose all seven resource kinds")
+    expected_resources = {
+        "wood",
+        "food",
+        "stone",
+        "gold",
+        "iron",
+        "coal",
+        "clay",
+        "fiber",
+        "timber",
+        "steel",
+        "bricks",
+        "cloth",
+        "rations",
+    }
+    if set(state.get("stockpile", {})) != expected_resources:
+        raise RuntimeError("production stockpile does not expose the explicit 13-resource catalog")
 
     print(
         "PASS production matches checkout; "

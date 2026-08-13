@@ -119,6 +119,15 @@
       #laptop-help p { margin: 0; padding: 0 9px 8px; }
       #placement { top: 43px; }
     }
+    @media (max-width: 699px) {
+      #resources {
+        display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; padding: max(4px, env(safe-area-inset-top)) 8px 4px;
+      }
+      #stockpiles { width: 100%; gap: 9px; font-size: 11px; }
+      #top-actions { width: 100%; justify-content: space-between; gap: 6px; }
+      #reset-world { min-height: 28px; padding: 3px 7px; }
+      #selection { bottom: calc(76px + env(safe-area-inset-bottom)); }
+    }
     @media (min-width: 700px) {
       #resources { padding-left: 18px; padding-right: 18px; }
       #selection { left: 18px; bottom: calc(84px + env(safe-area-inset-bottom)); }
