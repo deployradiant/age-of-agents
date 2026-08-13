@@ -710,14 +710,14 @@ function beginPinch() {
     zoom: camera.zoom,
     anchor: screenToRaw(middle.x, middle.y)
   };
+  selectionRectangle = null;
   gestureUsed = true;
 }
 function onPointerDown(event) {
   if (event.pointerType === 'mouse' && event.button !== 0) return;
   event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
-  const mouseBox = event.pointerType === 'mouse' && !hitAt(event.clientX, event.clientY) && !buildMode;
-  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, dragging: false, mouseBox, additive: event.shiftKey || event.pointerType === 'touch' });
+  pointers.set(event.pointerId, SelectionControls.beginPointer(event.pointerType, event.shiftKey, !hitAt(event.clientX, event.clientY), buildMode, event.clientX, event.clientY));
   if (pointers.size === 1) gestureUsed = false;
   if (pointers.size === 2) beginPinch();
 }
@@ -728,8 +728,7 @@ function onPointerMove(event) {
     return;
   }
   event.preventDefault();
-  pointer.x = event.clientX;
-  pointer.y = event.clientY;
+  const pointerMode = SelectionControls.movePointer(pointer, event.clientX, event.clientY, DRAG_THRESHOLD);
   if (pointers.size >= 2) {
     if (!pinch) beginPinch();
     const pair = [...pointers.values()].slice(0, 2);
@@ -740,12 +739,10 @@ function onPointerMove(event) {
     camera.y = pinch.anchor.y - (middle.y - cssHeight * 0.42) / nextZoom;
     clampCamera();
   } else {
-    const moved = Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
-    if (moved > DRAG_THRESHOLD) pointer.dragging = true;
-    if (pointer.dragging && pointer.mouseBox) {
+    if (pointerMode === 'box') {
       selectionRectangle = { start: { x: pointer.startX, y: pointer.startY }, end: { x: pointer.x, y: pointer.y } };
       gestureUsed = true;
-    } else if (pointer.dragging) {
+    } else if (pointerMode === 'pan') {
       camera.x -= (pointer.x - pointer.lastX) / camera.zoom;
       camera.y -= (pointer.y - pointer.lastY) / camera.zoom;
       clampCamera();
@@ -766,15 +763,17 @@ function finishPointer(event, cancelled) {
   if (!pointer) return;
   const wasSingle = pointers.size === 1;
   pointers.delete(event.pointerId);
-  if (!cancelled && pointer.mouseBox && pointer.dragging && selectionRectangle) {
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  const result = SelectionControls.finishPointer(pointer, cancelled, DRAG_THRESHOLD);
+  if (result === 'box' && selectionRectangle) {
     const rectangle = SelectionControls.normalizedRectangle(selectionRectangle.start, selectionRectangle.end);
     const enclosed = SelectionControls.enclosedUnitIds(authoritativeWorld.units, rectangle, project);
     selectedUnitIds = pointer.additive ? new Set([...selectedUnitIds, ...enclosed]) : new Set(enclosed);
     selectedBuildingId = null;
-    selectionRectangle = null;
     updateHud();
   }
-  if (!cancelled && wasSingle && !pointer.dragging && !gestureUsed && Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY) <= DRAG_THRESHOLD) {
+  selectionRectangle = null;
+  if (result === 'tap' && wasSingle && !gestureUsed) {
     handleTap(pointer.x, pointer.y, pointer.additive);
   }
   if (pointers.size < 2) {

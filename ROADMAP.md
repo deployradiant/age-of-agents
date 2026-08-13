@@ -37,7 +37,7 @@ Status: implemented on `feature/multi-unit-control`; not released.
 
 Gameplay acceptance:
 
-1. Mouse drag from empty ground draws a readable selection rectangle and selects all visible friendly units whose projected feet are enclosed; click selection still works.
+1. Intentional mouse Shift-drag from empty ground draws a readable selection rectangle and selects all visible friendly units whose projected feet are enclosed; ordinary drag still pans and click selection still works.
 2. Touch keeps pan/tap semantics and offers additive unit selection without accidental box selection.
 3. A group ground order is one typed authoritative command. Validation is atomic: one invalid/busy/member mismatch rejects the whole order without moving any unit.
 4. Accepted group movement assigns deterministic distinct reachable destinations, respects reservations/occupancy, and visibly moves every selected unit without stacking.

@@ -266,13 +266,35 @@ fn group_move_assigns_distinct_deterministic_reachable_destinations() {
         column: 10,
         row: 10
     }));
-    world.tick(30.0);
-    let occupied: BTreeSet<_> = world
-        .units
-        .iter()
-        .map(|unit| world.cell_for_position(unit.position).unwrap())
-        .collect();
-    assert_eq!(occupied.len(), 2);
+    let starts: Vec<_> = world.units.iter().map(|unit| unit.position).collect();
+    for _ in 0..600 {
+        world.tick(0.05);
+        let occupied: BTreeSet<_> = world
+            .units
+            .iter()
+            .map(|unit| world.cell_for_position(unit.position).unwrap())
+            .collect();
+        assert_eq!(
+            occupied.len(),
+            world.units.len(),
+            "group members stacked at tick {}",
+            world.tick
+        );
+        if world
+            .units
+            .iter()
+            .all(|unit| unit.action == UnitAction::Idle)
+        {
+            break;
+        }
+    }
+    assert!(
+        world
+            .units
+            .iter()
+            .zip(starts)
+            .all(|(unit, start)| unit.position != start)
+    );
     assert!(
         world
             .units

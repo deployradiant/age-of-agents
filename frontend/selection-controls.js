@@ -31,6 +31,31 @@
       if (additive && next.has(unitId)) next.delete(unitId);
       else next.add(unitId);
       return next;
+    },
+
+    gesture(pointerType, shiftKey, emptyGround, buildMode) {
+      return {
+        box: pointerType === 'mouse' && shiftKey && emptyGround && !buildMode,
+        additive: pointerType === 'touch' || shiftKey
+      };
+    },
+
+    beginPointer(pointerType, shiftKey, emptyGround, buildMode, x, y) {
+      const mode = this.gesture(pointerType, shiftKey, emptyGround, buildMode);
+      return { x, y, startX: x, startY: y, lastX: x, lastY: y, dragging: false, mouseBox: mode.box, additive: mode.additive };
+    },
+
+    movePointer(pointer, x, y, threshold) {
+      pointer.x = x;
+      pointer.y = y;
+      if (Math.hypot(x - pointer.startX, y - pointer.startY) > threshold) pointer.dragging = true;
+      return pointer.mouseBox && pointer.dragging ? 'box' : pointer.dragging ? 'pan' : 'pending';
+    },
+
+    finishPointer(pointer, cancelled, threshold) {
+      if (cancelled) return 'cancel';
+      if (pointer.mouseBox && pointer.dragging) return 'box';
+      return !pointer.dragging && Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY) <= threshold ? 'tap' : 'pan';
     }
   };
 
