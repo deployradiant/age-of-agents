@@ -36,7 +36,7 @@ enum ClientMessage {
 enum ServerMessage {
     Snapshot {
         sequence: u64,
-        world: WorldSnapshot,
+        world: Box<WorldSnapshot>,
     },
     CommandResult {
         request_id: String,
@@ -52,7 +52,7 @@ impl ServerMessage {
     fn snapshot(sequence: u64, world: &GameWorld) -> Self {
         Self::Snapshot {
             sequence,
-            world: world.snapshot(),
+            world: Box::new(world.snapshot()),
         }
     }
 }

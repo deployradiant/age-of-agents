@@ -15,7 +15,7 @@ Grow the proven gather/build demo into one compact, coherent RTS scenario. Every
 
 ## Slice A — Expandable domain foundation
 
-Status: planned.
+Status: implemented on `feature/expanded-domain-foundation`; not released.
 
 Deliver the smallest explicit catalogs and persisted state needed by later slices.
 

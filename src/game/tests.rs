@@ -409,6 +409,7 @@ fn completed_buildings_reveal_with_the_larger_building_radius() {
     world.buildings.clear();
     world.units.push(Unit {
         id: "unit-sight".into(),
+        kind: UnitKind::Villager,
         position: Position {
             x: 1200.0,
             y: 800.0,
@@ -431,7 +432,9 @@ fn idle_world_is_invariant_except_tick() {
     let initial = world.clone();
     world.tick(10.0);
     assert_eq!(world.tick, 1);
+    assert_eq!(world.scenario.elapsed_ticks, 1);
     world.tick = 0;
+    world.scenario.elapsed_ticks = 0;
     assert_eq!(world, initial);
 }
 
@@ -643,6 +646,12 @@ fn depositing_routes_each_carried_resource_to_its_typed_stockpile() {
             ResourceKind::Iron => world.stockpile.iron,
             ResourceKind::Clay => world.stockpile.clay,
             ResourceKind::Fiber => world.stockpile.fiber,
+            ResourceKind::Coal
+            | ResourceKind::Timber
+            | ResourceKind::Steel
+            | ResourceKind::Bricks
+            | ResourceKind::Cloth
+            | ResourceKind::Rations => unreachable!("default nodes contain raw resources only"),
         };
         assert_eq!(deposited, 10.0);
         assert_eq!(world.resources[resource_index].amount, 0.0);
@@ -692,6 +701,7 @@ fn produced_villager_waits_for_a_free_adjacent_cell() {
         .enumerate()
         .map(|(index, cell)| Unit {
             id: format!("blocker-{index}"),
+            kind: UnitKind::Villager,
             position: world.cell_center(cell),
             action: UnitAction::Idle,
             cargo: None,
@@ -937,4 +947,66 @@ fn build_rejects_occupied_site_before_reserving_wood() {
         Err(CommandError::InvalidBuildSite)
     );
     assert_eq!(world, before);
+}
+
+#[cfg(test)]
+mod slice_a_tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn roadmap_catalog_is_complete_stable_and_direct() {
+        let catalog = DomainCatalog::roadmap();
+        assert_eq!(catalog.resources, ResourceKind::ALL);
+        assert_eq!(catalog.buildings, BuildingKind::ALL);
+        assert_eq!(catalog.units, UnitKind::ALL);
+        assert_eq!(catalog.technologies, TechnologyKind::ALL);
+        assert_eq!(catalog.recipes.len(), 5);
+
+        let outputs: BTreeSet<_> = catalog.recipes.iter().map(|recipe| recipe.output).collect();
+        assert_eq!(
+            outputs,
+            BTreeSet::from([
+                ResourceKind::Timber,
+                ResourceKind::Steel,
+                ResourceKind::Bricks,
+                ResourceKind::Cloth,
+                ResourceKind::Rations,
+            ])
+        );
+        assert_eq!(*GameWorld::default().snapshot().catalog, catalog);
+    }
+
+    #[test]
+    fn scenario_reaches_loss_on_the_exact_authoritative_tick_boundary() {
+        let mut before = GameWorld::default();
+        before.scenario.elapsed_ticks = 7;
+        before.scenario.tick_limit = 9;
+        let mut repeat = before.clone();
+
+        before.tick(0.1);
+        repeat.tick(0.1);
+        assert_eq!(before, repeat);
+        assert_eq!(before.scenario.elapsed_ticks, 8);
+        assert_eq!(before.scenario.outcome, ScenarioOutcome::Running);
+
+        before.tick(0.1);
+        assert_eq!(before.scenario.elapsed_ticks, 9);
+        assert_eq!(before.scenario.outcome, ScenarioOutcome::Lost);
+        assert_eq!(before.snapshot().scenario, before.scenario);
+    }
+
+    #[test]
+    fn paused_and_invalid_ticks_do_not_advance_the_scenario_limit() {
+        let mut world = GameWorld::default();
+        world.scenario.elapsed_ticks = world.scenario.tick_limit - 1;
+        world.simulation_speed = 0.0;
+
+        world.tick(1.0);
+        world.tick(f64::NAN);
+        world.tick(-1.0);
+        assert_eq!(world.scenario.elapsed_ticks, world.scenario.tick_limit - 1);
+        assert_eq!(world.scenario.outcome, ScenarioOutcome::Running);
+    }
 }

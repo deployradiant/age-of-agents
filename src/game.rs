@@ -2,8 +2,11 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+mod domain;
 mod gathering;
 mod movement;
+
+pub use domain::*;
 
 pub const WORLD_WIDTH: f64 = 2400.0;
 pub const WORLD_HEIGHT: f64 = 1600.0;
@@ -30,234 +33,6 @@ fn default_simulation_speed() -> f64 {
     1.0
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Position {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Position {
-    fn distance(self, other: Self) -> f64 {
-        (self.x - other.x).hypot(self.y - other.y)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TerrainBiome {
-    Meadow,
-    Forest,
-    Prairie,
-    Highland,
-    Wetland,
-    Scrubland,
-    Heath,
-    Clayland,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CellCoordinate {
-    pub column: u16,
-    pub row: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TerrainCell {
-    pub column: u16,
-    pub row: u16,
-    pub biome: TerrainBiome,
-}
-
-impl TerrainCell {
-    fn coordinate(self) -> CellCoordinate {
-        CellCoordinate {
-            column: self.column,
-            row: self.row,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CellVisibility {
-    Unseen,
-    Explored,
-    Visible,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotTerrainCell {
-    pub column: u16,
-    pub row: u16,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub biome: Option<TerrainBiome>,
-    pub visibility: CellVisibility,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum UnitAction {
-    Idle,
-    Move {
-        x: f64,
-        y: f64,
-    },
-    Gather {
-        resource_id: String,
-        #[serde(default)]
-        phase: GatherPhase,
-    },
-    Build {
-        x: f64,
-        y: f64,
-        work_seconds: f64,
-    },
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GatherPhase {
-    #[default]
-    ToResource,
-    Gathering,
-    Returning,
-    Depositing,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CarriedResource {
-    pub kind: ResourceKind,
-    pub amount: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Unit {
-    pub id: String,
-    pub position: Position,
-    pub action: UnitAction,
-    #[serde(default)]
-    pub cargo: Option<CarriedResource>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ResourceNode {
-    pub id: String,
-    pub kind: ResourceKind,
-    pub position: Position,
-    pub amount: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResourceKind {
-    Wood,
-    Food,
-    Stone,
-    Gold,
-    Iron,
-    Clay,
-    Fiber,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Building {
-    pub id: String,
-    pub kind: BuildingKind,
-    pub position: Position,
-    pub produces: Vec<ProductKind>,
-    pub researches: Vec<TechnologyKind>,
-    pub job: Option<BuildingJob>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BuildingKind {
-    TownCenter,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProductKind {
-    Villager,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum BuildingJob {
-    Produce {
-        product: ProductKind,
-        elapsed_seconds: f64,
-    },
-    Research {
-        technology: TechnologyKind,
-        elapsed_seconds: f64,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TechnologyKind {
-    Forestry,
-    Agriculture,
-    Masonry,
-    Mining,
-    Textiles,
-}
-
-impl TechnologyKind {
-    const ALL: [Self; 5] = [
-        Self::Forestry,
-        Self::Agriculture,
-        Self::Masonry,
-        Self::Mining,
-        Self::Textiles,
-    ];
-
-    fn prerequisite(self) -> Option<Self> {
-        match self {
-            Self::Mining => Some(Self::Masonry),
-            Self::Textiles => Some(Self::Agriculture),
-            Self::Forestry | Self::Agriculture | Self::Masonry => None,
-        }
-    }
-
-    fn improves(self, resource: ResourceKind) -> bool {
-        matches!(
-            (self, resource),
-            (Self::Forestry, ResourceKind::Wood)
-                | (Self::Agriculture, ResourceKind::Food)
-                | (Self::Masonry, ResourceKind::Stone | ResourceKind::Clay)
-                | (Self::Mining, ResourceKind::Gold | ResourceKind::Iron)
-                | (Self::Textiles, ResourceKind::Fiber)
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Stockpile {
-    pub wood: f64,
-    pub food: f64,
-    pub stone: f64,
-    pub gold: f64,
-    pub iron: f64,
-    pub clay: f64,
-    pub fiber: f64,
-}
-
-impl Stockpile {
-    fn add(&mut self, kind: ResourceKind, amount: f64) {
-        match kind {
-            ResourceKind::Wood => self.wood += amount,
-            ResourceKind::Food => self.food += amount,
-            ResourceKind::Stone => self.stone += amount,
-            ResourceKind::Gold => self.gold += amount,
-            ResourceKind::Iron => self.iron += amount,
-            ResourceKind::Clay => self.clay += amount,
-            ResourceKind::Fiber => self.fiber += amount,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameWorld {
     pub width: f64,
@@ -273,6 +48,8 @@ pub struct GameWorld {
     pub buildings: Vec<Building>,
     pub stockpile: Stockpile,
     pub researched_technologies: Vec<TechnologyKind>,
+    #[serde(default)]
+    pub scenario: ScenarioState,
     next_building_id: u64,
     next_unit_id: u64,
 }
@@ -290,6 +67,8 @@ pub struct WorldSnapshot {
     pub buildings: Vec<Building>,
     pub stockpile: Stockpile,
     pub researched_technologies: Vec<TechnologyKind>,
+    pub catalog: Box<DomainCatalog>,
+    pub scenario: ScenarioState,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -384,6 +163,7 @@ impl Default for GameWorld {
             units: vec![
                 Unit {
                     id: "villager-1".into(),
+                    kind: UnitKind::Villager,
                     position: Position {
                         x: 1080.0,
                         y: 880.0,
@@ -393,6 +173,7 @@ impl Default for GameWorld {
                 },
                 Unit {
                     id: "villager-2".into(),
+                    kind: UnitKind::Villager,
                     position: Position {
                         x: 1240.0,
                         y: 880.0,
@@ -409,10 +190,17 @@ impl Default for GameWorld {
                 stone: 0.0,
                 gold: 0.0,
                 iron: 0.0,
+                coal: 0.0,
                 clay: 0.0,
                 fiber: 0.0,
+                timber: 0.0,
+                steel: 0.0,
+                bricks: 0.0,
+                cloth: 0.0,
+                rations: 0.0,
             },
             researched_technologies: Vec::new(),
+            scenario: ScenarioState::default(),
             next_building_id: 2,
             next_unit_id: 3,
         };
@@ -474,6 +262,12 @@ fn compatible_biomes(kind: ResourceKind) -> &'static [TerrainBiome] {
         ResourceKind::Iron => &[TerrainBiome::Highland, TerrainBiome::Scrubland],
         ResourceKind::Clay => &[TerrainBiome::Clayland, TerrainBiome::Wetland],
         ResourceKind::Fiber => &[TerrainBiome::Wetland, TerrainBiome::Prairie],
+        ResourceKind::Coal
+        | ResourceKind::Timber
+        | ResourceKind::Steel
+        | ResourceKind::Bricks
+        | ResourceKind::Cloth
+        | ResourceKind::Rations => &[],
     }
 }
 
@@ -705,6 +499,12 @@ impl GameWorld {
             self.tick_building_job(index, dt);
         }
         self.refresh_exploration();
+        self.scenario.elapsed_ticks = self.scenario.elapsed_ticks.saturating_add(1);
+        if self.scenario.outcome == ScenarioOutcome::Running
+            && self.scenario.elapsed_ticks >= self.scenario.tick_limit
+        {
+            self.scenario.outcome = ScenarioOutcome::Lost;
+        }
     }
 
     pub fn snapshot(&self) -> WorldSnapshot {
@@ -765,6 +565,8 @@ impl GameWorld {
                 .collect(),
             stockpile: self.stockpile.clone(),
             researched_technologies: self.researched_technologies.clone(),
+            catalog: Box::new(DomainCatalog::roadmap()),
+            scenario: self.scenario.clone(),
         }
     }
 
@@ -877,6 +679,7 @@ impl GameWorld {
                         };
                         self.units.push(Unit {
                             id: format!("villager-{}", self.next_unit_id),
+                            kind: UnitKind::Villager,
                             position,
                             action: UnitAction::Idle,
                             cargo: None,
