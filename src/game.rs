@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 mod domain;
 mod gathering;
+#[cfg(test)]
+mod group_move_tests;
 mod movement;
 #[cfg(test)]
 mod slice_a_tests;
