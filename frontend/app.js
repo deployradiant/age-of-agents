@@ -774,7 +774,8 @@ function finishPointer(event, cancelled) {
   }
   selectionRectangle = null;
   if (result === 'tap' && wasSingle && !gestureUsed) {
-    handleTap(pointer.x, pointer.y, pointer.additive);
+    const additive = SelectionControls.additiveTap(pointer.pointerType, pointer.shiftKey, Date.now() - pointer.startedAt);
+    handleTap(pointer.x, pointer.y, additive);
   }
   if (pointers.size < 2) {
     pinch = null;

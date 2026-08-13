@@ -25,8 +25,11 @@ assert.equal(pointerSequence('mouse', true, [{ x: 10, y: 10 }, { x: 30, y: 30 }]
 assert.equal(pointerSequence('touch', false, [{ x: 10, y: 10 }]).result, 'tap');
 assert.equal(pointerSequence('touch', false, [{ x: 10, y: 10 }, { x: 30, y: 30 }]).result, 'pan');
 assert.equal(pointerSequence('mouse', true, [{ x: 10, y: 10 }, { x: 30, y: 30 }], true).result, 'cancel');
-assert.equal(controls.beginPointer('touch', false, true, false, 0, 0).additive, true);
+assert.equal(controls.beginPointer('touch', false, true, false, 0, 0).additive, false);
 assert.equal(controls.beginPointer('mouse', false, true, false, 0, 0).additive, false);
+assert.equal(controls.additiveTap('touch', false, 449), false);
+assert.equal(controls.additiveTap('touch', false, 450), true);
+assert.equal(controls.additiveTap('mouse', true, 0), true);
 
 const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'frontend/app.js'), 'utf8');
