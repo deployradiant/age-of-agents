@@ -579,7 +579,7 @@ function updateHud() {
     const name = document.createElement('strong');
     name.textContent = `${selectedUnitIds.size} villagers selected`;
     const status = document.createElement('span');
-    status.textContent = 'Tap ground to move group · tap villagers to add or remove on touch';
+    status.textContent = 'Tap ground to move group · long-press villagers to add or remove on touch';
     selection.append(name, status);
     return;
   }
