@@ -1,51 +1,51 @@
 # Open Work
 
-**Last updated:** 2026-08-12
+**Last updated:** 2026-08-13T04:12:03Z
 **Branch:** `master`
-**Base commit:** `ecd6376`
-**Overall status:** Complete
+**Base commit:** `a491409`
+**Overall status:** Overnight autonomous expansion mission starting
 
 ## Current goal
 
-Restore strong gameplay readability after the grid-routing release: make cell boundaries clearly legible across terrain and fog states, re-audit unit/highlight alignment and movement hands-on, and require captured browser evidence before release.
+Turn Age of Agents from a bounded gather/build slice into a substantially richer playable RTS prototype: deeper resource/production chains, specialized buildings, drag-box multi-unit control, bounded scenario win conditions, combat/defense roles, and raid events.
 
-## Root causes
+## Operating model
 
-- Interaction routing could return an empty route when a villager was already inside the chosen adjacent cell but off-center, permanently stalling its phase. Released in `5d7d54c` with an exact production-state regression.
-- Sprite frames used a fixed ground anchor despite varying transparent padding, offsetting visible feet from the authoritative selection point. Released in `5d7d54c` with a frame-derived anchor.
-- Terrain relied on noisy texture repetition and biome transitions to imply cells. There was no stable, texture-independent projected grid, so the navigable board and fog frontier were difficult to parse.
+- One long-running parent goal agent owns integration on `master`.
+- At most two independent implementation lanes run concurrently, each in an isolated branch/worktree.
+- Every slice is reviewed for specification and code quality before merge.
+- After each coherent merge: run the full gate, update this log and the roadmap, push, deploy, inspect authoritative state, and play the game in Chromium with screenshots.
+- Browser/gameplay quality is a release gate. `/state`, static checks, or deployment parity alone are insufficient.
+- Prefer a small coherent simulation over broad shallow scaffolding. Remove unearned abstractions.
 
-## Work completed locally
+## Product tracks
 
-- Added a dedicated projected grid overlay above terrain art and below gameplay entities.
-- The grid uses dark structural separation, a restrained warm ink accent, and a stronger boundary only where visible terrain meets unseen fog.
-- Strengthened selected-unit rings with dark separation and a bright semantic edge while preserving the shared feet/ground anchor.
-- Extracted the grid renderer into `frontend/grid-overlay.js` to keep `frontend/app.js` below the 1,000-line review gate.
-- Added a focused grid-legibility contract check covering fog privacy, render order, structural contrast, and selection separation.
+1. Economy: approximately 10–15 raw and refined resources, specialized extraction/production buildings, and explicit multi-input recipes such as iron + coal → steel.
+2. RTS control: drag-box multi-selection and group movement/task commands.
+3. Progression/challenge: building upgrades, building-specific research, and a handful of bounded build/explore/survive victory scenarios.
+4. Combat/events: melee, archer, siege, healer, defenses, damage/healing, and deterministic raid events such as pirates.
+5. Quality: regression coverage, strict review, real browser play, screenshots, production parity, and correction loops.
+
+## Completed in the working tree
+
+None for the new mission. The prior projected-grid and selection-readability release is live and verified.
 
 ## Verification completed
 
-- Captured and reviewed the live production baseline: terrain read as noisy texture patches with no stable navigable-cell structure.
-- Captured and reviewed two local grid iterations, toning down the initial warm checkerboard effect while retaining clear dark cell separation.
-- Hands-on local gameplay passed: selected a villager, issued a ground move, observed authoritative completion at a new cell, and verified the final ring is centered on visible feet and readable against the grid.
-- Final screenshot review found no release-blocking grid, fog-frontier, or selection-alignment defect.
-- Full final gate passes: 46 Rust tests, strict Clippy, formatting, JavaScript syntax, all frontend checks including the grid-legibility contract, Python compilation, asset validation, and diff checks.
-- Thermonuclear review passes: the visual system is isolated in a 64-line module, `frontend/app.js` is 995 lines, no simulation or persistence shape changed, and unseen terrain is never outlined.
-- Released as `f2a7a53`; GitHub Actions run `31650967420` passed quality and deployment, and Modal parity verification passed.
-- Production screenshot review initially exposed browser-cached pre-release JavaScript despite artifact parity; a hard reload loaded the deployed grid. Final production review verified the Modal URL, visible tick, projected grid, fog frontier, selected-unit status panel, and a selection ring centered at the villager's feet with no release blocker.
+- `master` and `origin/master` were aligned at `a491409` before this mission handoff.
+- Production parity passed before mission start: 600 terrain cells, two units, 476 unseen cells, six directional assets, speed 1×.
+- GitHub had no open pull requests or issues at mission start.
 
 ## Open work
 
-None.
+1. Rewrite `ROADMAP.md` into vertical slices and define the first two independent implementation lanes.
+2. Implement, review, merge, test, deploy, and browser-play each slice.
+3. Continue selecting the next two lanes until the playable-prototype goal is met or a genuine external blocker is reached.
 
 ## Blockers
 
-None. X11 screenshot capture and injected pointer input provide a working hands-on review path despite the browser daemon integration remaining unavailable.
+None.
 
 ## Exact next action
 
-None — work is complete.
-
-## Maintenance rule
-
-Keep this file current rather than appending a diary. Update it at task start, after meaningful milestones, when blockers change, before commit/push/deploy transitions, and before ending a work session. Never store credentials or tokens here.
+The overnight goal agent should inspect the current architecture, rewrite the roadmap, choose the first two low-overlap vertical slices, and start them in isolated worktrees.
